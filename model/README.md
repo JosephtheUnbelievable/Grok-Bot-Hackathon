@@ -23,3 +23,17 @@ Do not edit `backend/`, `frontend/`, `fixtures/`, `tasks/`, `PLAN.md`, `API.md`,
 ## Contract change requests
 
 _Empty unless the checkpoint agrees a change. Do not edit API.md yourself._
+
+## Assumptions
+
+The dataclasses and method names match `API.md`. These are the choices made where the contract left the mechanics open:
+
+- Forecast concentration `low` / `median` / `high` are the 10th / 50th / 90th percentiles of `round(100 * p)` across 40 year-resamples (`numpy` Generator seed 0), then rounded to a byte. `extent_km2` on a forecast grid is the scaled cell-sum of **that band's grid**. On `extent_series`, `extent_km2` matches the median grid; `low_km2` / `high_km2` are the 10th / 90th percentiles of the 40 bootstrap cell-sums after the same scale.
+- The scale is one number per pole per month: mean CSV extent over 2000–2010 (nulls ignored) divided by the mean unscaled median-grid cell-sum over those years. It is 1.0 when there is nothing to scale against. Observed months report `extent_scale` 1.0 because they return the CSV extent.
+- A year present in `cumulative_co2_gt_by_year` uses that value, including backtest years after 2010. Later years use the blended SSP cumulative. A missing year holds the latest known value at or before it. The warming fallback fits on the mean of the pathways that provide each training year (they are one historical path) and predicts with the blended pathway.
+- Backtest September scores use scenario `ssp245` only as the warming-fallback lookup. The scored regressor for cumulative CO2 is the historical series.
+- Bootstrap random draws are taken for north then south, months 1–12, and only for a month that has at least one cell with 8 unmasked years.
+- With no GRACE samples, mass starts at 0 in 2002 and accumulates at −264 Gt/yr (Greenland) and −135 Gt/yr (Antarctica). Through 2025 the rate is constant. After 2025, `M = rate * (2025 - 2002) + rate * max(W(year) / W(2025), 0) * (year - 2025)`. `uncertainty_gt` is not used; the interval is an empirical residual bootstrap. If only one sheet has samples, the other uses the NASA rate and `sea_level_source` stays `grace-gracefo`.
+- Inside the GRACE record the reported millimetres use the nearest sample (an exact time tie keeps the earlier one). Each residual-bootstrap draw refits, then uses that same rule on the resampled series. `Y` in the quadratic is the calendar year as a real number (`2025.0`).
+- An empty grid list (or a request before `update`) returns a 1×1 grid of 255 with source `model-not-ready`. February in the shipping proxy is 28 days, including leap years.
+- North lat/lon is computed only for a 304×448 grid, using the NSIDC 25 km definition documented in `ice_model.py`. Other shapes leave the winter index `None` and both shipping seasons at 0 / `None`.
