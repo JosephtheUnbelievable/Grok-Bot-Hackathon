@@ -56,12 +56,14 @@ The browser talks only to our API for ice, extent, impact, and backtest. It may 
 | 1. Data and API | `feat/backend` | `backend/` | `API.md`, `model/` (import only), `fixtures/` |
 | 2. Forecast model | `feat/model` | `model/` | `API.md`, `fixtures/` |
 | 3. Globe and impact UI | `feat/frontend` | `frontend/` | `API.md`, `fixtures/` (import, do not edit) |
+| 4. Arctic ships | `feat/ships` | `ships/` | `API.md` (Task 4). North concentration only through the `install` hook |
 
 Paste the matching file from `tasks/` into your assistant:
 
 - `tasks/1-backend-data.md`
 - `tasks/2-forecast-model.md`
 - `tasks/3-frontend-globe.md`
+- `tasks/4-ships.md`
 
 `API.md` is the contract. If a brief and `API.md` disagree, `API.md` wins.
 
