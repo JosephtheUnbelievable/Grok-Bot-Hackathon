@@ -1,0 +1,77 @@
+{
+  "pole": "north",
+  "month": 9,
+  "scenario": "ssp245",
+  "blend": null,
+  "band_note": "low is p10 and high is p90 of bootstrap extent; null on observed years",
+  "fixture": true,
+  "fixture_notice": "DEV FIXTURE — not an observation and not a forecast. Generated for parallel UI work.",
+  "generated_at": "2026-11-19T23:00:00Z",
+  "stale": false,
+  "regressor": "cumulative_co2_gt",
+  "observed_through": { "year": 2024, "month": 9 },
+  "units": { "extent": "km2" },
+  "climatology_1981_2010_km2": 6200000,
+  "series": [
+    {
+      "year": 1979,
+      "extent_km2": 7050000,
+      "low_km2": null,
+      "high_km2": null,
+      "is_forecast": false,
+      "gap_masked": false,
+      "source": "nsidc-g02135",
+      "extent_method": "nsidc_monthly_csv"
+    },
+    {
+      "year": 1987,
+      "extent_km2": 7000000,
+      "low_km2": null,
+      "high_km2": null,
+      "is_forecast": false,
+      "gap_masked": false,
+      "source": "nsidc-g02135",
+      "extent_method": "nsidc_monthly_csv"
+    },
+    {
+      "year": 2012,
+      "extent_km2": 3390000,
+      "low_km2": null,
+      "high_km2": null,
+      "is_forecast": false,
+      "gap_masked": false,
+      "source": "nsidc-g02135",
+      "extent_method": "nsidc_monthly_csv"
+    },
+    {
+      "year": 2024,
+      "extent_km2": 4280000,
+      "low_km2": null,
+      "high_km2": null,
+      "is_forecast": false,
+      "gap_masked": false,
+      "source": "nsidc-g02135",
+      "extent_method": "nsidc_monthly_csv"
+    },
+    {
+      "year": 2050,
+      "extent_km2": 1800000,
+      "low_km2": 1200000,
+      "high_km2": 2600000,
+      "is_forecast": true,
+      "gap_masked": false,
+      "source": "model-forecast",
+      "extent_method": "model_cell_sum_scaled"
+    },
+    {
+      "year": 2100,
+      "extent_km2": 400000,
+      "low_km2": 0,
+      "high_km2": 1500000,
+      "is_forecast": true,
+      "gap_masked": false,
+      "source": "model-forecast",
+      "extent_method": "model_cell_sum_scaled"
+    }
+  ]
+}

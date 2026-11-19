@@ -1,0 +1,74 @@
+{
+  "status": "degraded",
+  "fixture": true,
+  "fixture_notice": "DEV FIXTURE — not an observation and not a forecast. Generated for parallel UI work.",
+  "generated_at": "2026-11-19T23:00:00Z",
+  "observed_through": { "year": 2024, "month": 9 },
+  "regressor": "cumulative_co2_gt",
+  "model_ready": true,
+  "feeds": {
+    "nsidc_daily_extent": {
+      "status": "ok",
+      "last_updated": "2024-09-30T00:00:00Z",
+      "last_success": "2026-11-19T22:50:00Z",
+      "age_seconds": 120,
+      "stale": false,
+      "using_cache": false,
+      "detail": "N_seaice_extent_daily_v4.0.csv"
+    },
+    "nsidc_monthly_extent": {
+      "status": "ok",
+      "last_updated": "2024-09-01T00:00:00Z",
+      "last_success": "2026-11-19T22:50:00Z",
+      "age_seconds": 120,
+      "stale": false,
+      "using_cache": false,
+      "detail": "N_09_extent_v4.0.csv"
+    },
+    "nsidc_monthly_concentration": {
+      "status": "ok",
+      "last_updated": "2024-09-01T00:00:00Z",
+      "last_success": "2026-11-19T22:50:00Z",
+      "age_seconds": 120,
+      "stale": false,
+      "using_cache": false,
+      "detail": "N_202409_concentration_v4.0.tif"
+    },
+    "gibs": {
+      "status": "stale",
+      "last_updated": "2025-09-01T00:00:00Z",
+      "last_success": "2026-11-19T22:50:00Z",
+      "age_seconds": 400,
+      "stale": true,
+      "using_cache": false,
+      "detail": "AMSRU2_Sea_Ice_Concentration_25km advertised end 2025-09-01"
+    },
+    "grace_icesheet": {
+      "status": "stale",
+      "last_updated": null,
+      "last_success": null,
+      "age_seconds": null,
+      "stale": true,
+      "using_cache": false,
+      "detail": "earthdata-login-required; nasa-science-summary-fallback"
+    },
+    "ssp_pathways": {
+      "status": "ok",
+      "last_updated": "2024-01-01T00:00:00Z",
+      "last_success": "2026-11-19T22:50:00Z",
+      "age_seconds": 400,
+      "stale": false,
+      "using_cache": false,
+      "detail": "marker Emissions|CO2"
+    },
+    "natural_earth": {
+      "status": "ok",
+      "last_updated": "2021-09-04T05:54:03Z",
+      "last_success": "2026-11-19T22:50:00Z",
+      "age_seconds": 80,
+      "stale": false,
+      "using_cache": false,
+      "detail": "ne_110m_coastline.zip"
+    }
+  }
+}
