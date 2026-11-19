@@ -567,3 +567,134 @@ Files in `fixtures/` set `"fixture": true` and include:
 ```
 
 The frontend shows that notice whenever it is reading fixtures or whenever `fixture` is true. It does not show fixture numbers as satellite data.
+
+## Task 4: Ships
+
+Role 4 owns this section. Routes live on `ships.router` and are mounted by one hook, which is the only backend edit:
+
+```python
+from ships.router import install
+install(app, concentration_at=north_concentration_at)
+```
+
+`concentration_at(lat: float, lon: float) -> float | None` returns ice concentration in percent from the latest observed north grid, or `None` when the cell is masked or no grid is loaded. The ships package does not download NSIDC. Omitting the sampler is legal: ships still stream and `ice_risk.level` is `unknown`.
+
+Standalone process for Role 4, so port 8000 stays with Role 1: `PYTHONPATH=. uvicorn ships.router:app --port 8099`.
+
+`AISSTREAM_API_KEY` is required for a live socket. `GFW_API_TOKEN` is optional. Both are empty placeholders in `.env.example`. A missing AIS key is HTTP 200 with health `down`, not a 500 and not the recorded sample.
+
+### `GET /ships/health`
+
+No query parameters. Always HTTP 200.
+
+`status` uses the feed enum: `ok`, `stale`, `down`.
+
+| `status` | When |
+| --- | --- |
+| `ok` | Socket open, and either a message arrived within the last 60 seconds or the socket has been open for under 60 seconds. |
+| `stale` | Socket down or silent for more than 60 seconds, and at least one vessel is still stored. |
+| `down` | Key unset, or socket down and no vessel has ever been stored. |
+
+```json
+{
+  "status": "ok",
+  "fixture": false,
+  "generated_at": "2026-11-19T23:00:00Z",
+  "stale": false,
+  "connected": true,
+  "using_sample": false,
+  "source": "aisstream",
+  "last_message_at": "2026-11-19T23:00:00Z",
+  "vessel_count": 1,
+  "reconnect_attempt": 0,
+  "decode_errors": 0,
+  "detail": "arctic 60–90 N; gfw: off"
+}
+```
+
+`using_sample` is **false** on this route always. `fixture` is **false**. `last_message_at` is `null` until the first accepted message. `detail` is a short human string and must not contain the API key. `stale` is true when `status` is `stale`.
+
+`Cache-Control: no-cache`.
+
+### `GET /ships`
+
+No query parameters. Always HTTP 200. One object per vessel currently stored (dropped 6 hours after `last_seen`).
+
+```json
+{
+  "fixture": false,
+  "generated_at": "2026-11-19T23:00:00Z",
+  "stale": false,
+  "source": "aisstream",
+  "bounding_box": { "min_lat": 60, "max_lat": 90, "min_lon": -180, "max_lon": 180 },
+  "count": 1,
+  "ships": [
+    {
+      "mmsi": "273456789",
+      "name": "EXAMPLE",
+      "vessel_type": "cargo",
+      "vessel_type_code": 70,
+      "lat": 72.1,
+      "lon": 40.2,
+      "sog_kn": 12.4,
+      "cog_deg": 35.0,
+      "heading": 40,
+      "last_seen": "2026-11-19T23:00:00Z",
+      "is_stale": false,
+      "icebreaker": false,
+      "track": [
+        {
+          "lat": 72.0,
+          "lon": 40.0,
+          "t": "2026-11-19T22:40:00Z",
+          "source": "aisstream"
+        }
+      ],
+      "ice_risk": {
+        "level": "marginal",
+        "concentration_here": 8.0,
+        "concentration_ahead": 22.0,
+        "entering": true
+      }
+    }
+  ]
+}
+```
+
+| Field | Unit / values |
+| --- | --- |
+| `mmsi` | String, 9 digits, first digit 2–7. |
+| `name` | String or `null`. |
+| `vessel_type` | `fishing`, `tug`, `pleasure`, `high_speed`, `passenger`, `cargo`, `tanker`, `special`, `unknown`. |
+| `vessel_type_code` | AIS integer or `null`. |
+| `lat`, `lon` | Degrees. Latest accepted AIS position. Never a Global Fishing Watch point. |
+| `sog_kn` | Knots, or `null` when AIS sent 102.2 or 102.3. |
+| `cog_deg` | Degrees, or `null` when AIS sent 360. |
+| `heading` | Degrees, or `null` when AIS sent 511. |
+| `last_seen` | UTC ISO-8601 of the message that set the current position. |
+| `is_stale` | True when the feed is stale or this vessel’s `last_seen` is older than 15 minutes. |
+| `icebreaker` | True only when the name contains `ICEBREAKER`. AIS has no ice class. |
+| `track` | Oldest first, at most 12 points, including the current position as the last AIS point. `source` is `aisstream` or `gfw`. |
+| `ice_risk.level` | `clear`, `marginal`, `heavy`, `unknown`. |
+| `ice_risk.concentration_here` | Percent, or `null`. |
+| `ice_risk.concentration_ahead` | Percent, or `null`. Max of the samples at 6 h and 12 h along `cog_deg`, or along `heading` when course is null. Equals `concentration_here` when `sog_kn` is 0. `null` when `sog_kn` is null. |
+| `ice_risk.entering` | True when both concentrations are numbers and the ship crosses 15% or 50% upward. |
+
+`source` on the envelope is `aisstream` while the socket is healthy and `aisstream-stale` while last positions are being served. `stale` on the envelope matches health. `count` is `ships.length`.
+
+`level` is `heavy` if either concentration is `>= 50`, else `marginal` if either is `>= 15`, else `clear` if any sample is a number, else `unknown`. A missing sampler leaves both concentrations `null` and the ship in the list.
+
+### Recorded sample
+
+`ships/testdata/ais_sample.jsonl` is an offline unit-test input. The test helper that reads it must set:
+
+```json
+{
+  "fixture": true,
+  "source": "recorded-sample",
+  "fixture_notice": "RECORDED SAMPLE — not a live AIS feed. Offline unit-test input only."
+}
+```
+
+No HTTP route reads that file. Do not add a query switch for it. The globe must not present the sample as live traffic.
+
