@@ -21,8 +21,8 @@ export function createGlobe(container) {
   controls.target.set(0, 0, 0);
 
   const fallbackMat = new THREE.MeshStandardMaterial({
-    color: 0x1a242c,
-    roughness: 0.96,
+    color: 0x6d8b98,
+    roughness: 0.9,
     metalness: 0,
   });
   const photoMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -176,9 +176,34 @@ export function createGlobe(container) {
       nudge(0, -step);
     }
   });
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let idleTimer = 0;
+  function armIdle() {
+    controls.autoRotate = false;
+    window.clearTimeout(idleTimer);
+    if (reduceMotion) return;
+    idleTimer = window.setTimeout(() => {
+      if (!anim) {
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.35;
+      }
+    }, 4000);
+  }
+
   container.addEventListener("pointerdown", () => {
     anim = null;
+    armIdle();
   });
+  renderer.domElement.addEventListener("wheel", armIdle, { passive: true });
+  container.addEventListener("keydown", armIdle);
+  controls.addEventListener("start", armIdle);
+
+  function fitRadius() {
+    const vFov = (camera.fov * Math.PI) / 180;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(camera.aspect, 0.2));
+    const margin = 1.16;
+    return Math.max(margin / Math.tan(vFov / 2), margin / Math.tan(hFov / 2));
+  }
 
   function resize() {
     const w = container.clientWidth || 1;
@@ -186,13 +211,22 @@ export function createGlobe(container) {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h, false);
+    const spherical = new THREE.Spherical().setFromVector3(camera.position);
+    if (!Number.isFinite(spherical.radius) || spherical.radius < 0.1) {
+      spherical.set(fitRadius(), Math.PI / 2, 0);
+    }
+    spherical.radius = fitRadius();
+    camera.position.setFromSpherical(spherical);
+    controls.minDistance = spherical.radius * 0.98;
+    controls.maxDistance = spherical.radius * 1.45;
+    controls.update();
   }
 
   const observer = new ResizeObserver(resize);
   observer.observe(container);
+  camera.position.copy(vectorFor(-32, 28, 4.2));
   resize();
-  camera.position.copy(vectorFor(-32, 38, 2.85));
-  controls.update();
+  armIdle();
 
   function frame(now) {
     if (!running) return;

@@ -59,9 +59,51 @@ try {
   console.error(err);
 }
 
-$("view-north").addEventListener("click", () => globe?.lookNorth());
-$("view-south").addEventListener("click", () => globe?.lookSouth());
 $("controls").addEventListener("submit", (event) => event.preventDefault());
+
+function setDrawer(open) {
+  $("drawer").hidden = !open;
+  $("drawer-btn").setAttribute("aria-expanded", open ? "true" : "false");
+  $("app").classList.toggle("drawer-open", open);
+}
+
+function bindToggle(button, panel, { focus = false } = {}) {
+  const close = () => {
+    panel.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+  };
+  const open = () => {
+    panel.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    if (focus) panel.querySelector("input, button")?.focus();
+  };
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (panel.hidden) open();
+    else close();
+  });
+  return { open, close };
+}
+
+const optionsUi = bindToggle($("options-btn"), $("options-pop"), { focus: true });
+const healthUi = bindToggle($("health-btn"), $("health-pop"));
+$("drawer-btn").addEventListener("click", () => setDrawer($("drawer").hidden));
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (!$("options-pop").hidden) {
+    optionsUi.close();
+    $("options-btn").focus();
+  }
+  if (!$("health-pop").hidden) {
+    healthUi.close();
+    $("health-btn").focus();
+  }
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".menu")) optionsUi.close();
+  if (!event.target.closest(".health-wrap")) healthUi.close();
+});
+if (location.hash === "#impacts") setDrawer(true);
 
 yearInput.addEventListener("input", () => {
   state.year = Number(yearInput.value);
@@ -142,9 +184,13 @@ function paintInstant() {
   monthInput.setAttribute("aria-valuetext", monthName);
   blendInput.setAttribute("aria-valuenow", blend);
   blendInput.setAttribute("aria-valuetext", `${scenarioLabel(state.blend)}, blend ${blend}`);
-  $("year-out").textContent = `${state.year} · ${mode.text}`;
+  $("year-out").textContent = String(state.year);
   $("month-out").textContent = monthName;
   $("blend-out").textContent = `blend ${blend}`;
+  const shortMonth = monthName.slice(0, 3);
+  const poleName = state.pole === "north" ? "North" : "South";
+  const bandName = state.band === "low" ? "Low" : state.band === "high" ? "High" : "Median";
+  $("options-btn").textContent = `${shortMonth} · ${poleName} · ${bandName}`;
   fill(yearInput);
   fill(monthInput);
   fill(blendInput);
@@ -163,7 +209,7 @@ function paintInstant() {
   }
 
   const pole = state.pole === "north" ? "North" : "South";
-  $("when").textContent = `${monthName} ${state.year} · ${pole} · ${mode.text}`;
+  $("when").textContent = `${monthName} ${state.year} · ${pole}`;
   $("mode-pill").textContent = mode.text;
   $("mode-pill").dataset.kind = mode.kind;
 
@@ -230,8 +276,7 @@ function renderPanel() {
   down.hidden = true;
   body.replaceChildren();
 
-  body.append(el("p", "kicker", "Impacts"));
-  body.append(el("h2", null, "What the year changes"));
+  body.append(el("h2", null, "Impacts"));
   const blend = Number(state.blend).toFixed(1);
   body.append(el("p", "sub", `Year ${state.year} · blend ${blend} · ${scenarioLabel(state.blend)}`));
   if (USE_FIXTURES || state.impact?.fixture) {
@@ -353,6 +398,26 @@ function addDef(details, title, text) {
   details.append(p);
 }
 
+function renderHealthPop() {
+  const pop = $("health-pop");
+  if (!pop) return;
+  pop.replaceChildren();
+  if (!state.health) {
+    pop.append(el("p", "sub", state.feedDown ? "Feed down" : "No health response."));
+    return;
+  }
+  pop.append(el("p", "sub", `Status ${state.health.status}`));
+  const grid = el("div", "feeds");
+  for (const [id, feed] of Object.entries(state.health.feeds || {})) {
+    const row = el("div", "feed");
+    row.append(el("span", "feed-name", FEED_LABELS[id] || id));
+    row.append(el("span", `feed-status status-${feed.status || "down"}`, feed.status || "down"));
+    if (feed.detail) row.title = feed.detail;
+    grid.append(row);
+  }
+  pop.append(grid);
+}
+
 function renderSources() {
   const meta = state.iceMeta;
   const bits = [];
@@ -385,16 +450,22 @@ function render() {
   paintInstant();
   const mode = modeOf();
   const health = $("health-pill");
+  const dot = $("health-dot");
   if (state.feedDown) {
     health.textContent = "Feed down";
     health.dataset.kind = "down";
+    if (dot) dot.dataset.status = "down";
+    setDrawer(true);
   } else if (state.health?.status) {
-    health.textContent = `Feeds ${state.health.status}`;
+    health.textContent = state.health.status;
     health.dataset.kind = state.health.status === "ok" ? "observed" : state.health.status === "down" ? "down" : "forecast";
+    if (dot) dot.dataset.status = state.health.status;
   } else {
     health.textContent = "—";
     health.dataset.kind = "";
+    if (dot) dot.dataset.status = "down";
   }
+  renderHealthPop();
   $("app").dataset.mode = state.feedDown ? "down" : mode.kind;
   renderSources();
   renderBanner();
@@ -474,7 +545,7 @@ const photo = gibsUrl(state.observedThrough);
 state.basemapTime = photo.time;
 globe?.setBasemap(photo.url, (ok) => {
   state.basemapNote = ok
-    ? `Photograph: MODIS Terra, ${photo.time}. Not the selected month.`
+    ? "Basemap: Blue Marble shaded relief. Not the selected month."
     : "Basemap unavailable. Dark sphere.";
   $("basemap-line").textContent = state.basemapNote;
 });

@@ -16,13 +16,10 @@ function clone(value) {
   return structuredClone(value);
 }
 
-export function gibsUrl(through) {
-  const year = through?.year || 2024;
-  const month = String(through?.month || 9).padStart(2, "0");
-  const time = `${year}-${month}-15`;
+export function gibsUrl() {
   return {
-    time,
-    url: `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=MODIS_Terra_CorrectedReflectance_TrueColor&FORMAT=image/jpeg&WIDTH=1024&HEIGHT=512&CRS=EPSG:4326&BBOX=-90,-180,90,180&TIME=${time}`,
+    time: "Blue Marble",
+    url: "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=BlueMarble_ShadedRelief_Bathymetry&STYLES=&FORMAT=image/jpeg&WIDTH=1024&HEIGHT=512&CRS=EPSG:4326&BBOX=-90,-180,90,180",
   };
 }
 
@@ -52,30 +49,61 @@ export function paintIce(ice) {
   const cx = (width - 1) / 2;
   const cy = (height - 1) / 2;
   const south = ice.pole === "south";
-  const reach = 34;
+  const reach = 36;
+
+  const sample = (gx, gy) => {
+    if (gx < 0 || gy < 0 || gx > width - 1 || gy > height - 1) return null;
+    const x0 = Math.floor(gx);
+    const y0 = Math.floor(gy);
+    const x1 = Math.min(width - 1, x0 + 1);
+    const y1 = Math.min(height - 1, y0 + 1);
+    const tx = gx - x0;
+    const ty = gy - y0;
+    const corners = [
+      [bytes[y0 * width + x0], (1 - tx) * (1 - ty)],
+      [bytes[y0 * width + x1], tx * (1 - ty)],
+      [bytes[y1 * width + x0], (1 - tx) * ty],
+      [bytes[y1 * width + x1], tx * ty],
+    ];
+    let acc = 0;
+    let weight = 0;
+    for (const [value, wgt] of corners) {
+      if (value === 255) continue;
+      acc += value * wgt;
+      weight += wgt;
+    }
+    if (weight < 0.2) return null;
+    return acc / weight;
+  };
 
   for (let y = 0; y < 512; y++) {
     const lat = 90 - (y / 511) * 180;
     const colat = south ? 90 + lat : 90 - lat;
     if (colat < 0 || colat > reach) continue;
-    const radius = (colat / reach) * 3.15;
+    const radius = (colat / reach) * 3.05;
     for (let x = 0; x < 1024; x++) {
       const lon = -180 + (x / 1023) * 360;
       const theta = (lon * Math.PI) / 180;
-      const ix = Math.round(cx + Math.sin(theta) * radius);
-      const iy = Math.round(cy - Math.cos(theta) * radius);
-      if (ix < 0 || iy < 0 || ix >= width || iy >= height) continue;
-      const v = bytes[iy * width + ix];
-      if (v === 255 || v < 15) continue;
-      const t = Math.min(1, (v - 15) / 85);
+      const value = sample(cx + Math.sin(theta) * radius, cy - Math.cos(theta) * radius);
+      if (value == null || value < 15) continue;
+      const t = Math.min(1, (value - 15) / 85);
+      const alpha = value < 30 ? Math.round(((value - 15) / 15) * 255) : 230;
       const o = (y * 1024 + x) * 4;
       data[o] = Math.round(93 + (255 - 93) * t);
       data[o + 1] = Math.round(173 + (255 - 173) * t);
       data[o + 2] = Math.round(226 + (255 - 226) * t);
-      data[o + 3] = 255;
+      data[o + 3] = alpha;
     }
   }
   ctx.putImageData(img, 0, 0);
+  const soft = document.createElement("canvas");
+  soft.width = 1024;
+  soft.height = 512;
+  const softCtx = soft.getContext("2d");
+  softCtx.filter = "blur(10px)";
+  softCtx.drawImage(canvas, 0, 0);
+  ctx.clearRect(0, 0, 1024, 512);
+  ctx.drawImage(soft, 0, 0);
   return canvas;
 }
 
