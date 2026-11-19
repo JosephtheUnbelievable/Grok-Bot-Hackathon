@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.eggs/
+dist/
+build/
+htmlcov/
+.coverage
+coverage.xml
+
+# Downloaded data and last-good caches (never commit feed dumps)
+backend/cache/
+**/.cache/
+
+# Node / Vite
+node_modules/
+frontend/dist/
+*.local
+
+# Env and secrets (Earthdata credentials live here, never in git)
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log

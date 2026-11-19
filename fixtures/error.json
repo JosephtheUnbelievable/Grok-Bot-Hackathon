@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "invalid_parameter",
+    "message": "year must be an integer from 1979 to 2100",
+    "param": "year"
+  }
+}

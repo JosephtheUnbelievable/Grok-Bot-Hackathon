@@ -1,0 +1,44 @@
+{
+  "year": 2050,
+  "scenario": "ssp245",
+  "blend": null,
+  "fixture": true,
+  "fixture_notice": "DEV FIXTURE — not an observation and not a forecast. Generated for parallel UI work.",
+  "generated_at": "2026-11-19T23:00:00Z",
+  "stale": false,
+  "is_forecast": true,
+  "regressor": "cumulative_co2_gt",
+  "observed_through": { "year": 2024, "month": 9 },
+  "shipping": {
+    "northern_sea_route": {
+      "open_season_days": 120,
+      "opening_date": "2050-07-01",
+      "open_month_count": 4,
+      "definition": "Proxy, not a route solver. A month is open when the mean concentration of unmasked cells in lat 66–80 N, lon 30–180 E is below 15%. Days = 30 per open month, 28 in February. opening_date is the first day of the first open month on or after June, else null when no month from June onward is open."
+    },
+    "northwest_passage": {
+      "open_season_days": 60,
+      "opening_date": "2050-08-01",
+      "open_month_count": 2,
+      "definition": "Same proxy for lat 68–75 N, lon 140 W–60 W."
+    }
+  },
+  "communities": {
+    "ice_free_september_year": 2052,
+    "winter_ice_loss_index": 0.42,
+    "definitions": {
+      "ice_free_september_year": "First year in 1979–2100 whose September northern extent_km2 is below 1000000 under this scenario's median band. null if none.",
+      "winter_ice_loss_index": "Share of unmasked cells at lat >= 60 N whose 1981–2010 February mean was >= 15% and whose February concentration in the selected year is < 15%. Range 0–1. null if that climatology cannot be built."
+    }
+  },
+  "sea_level": {
+    "greenland_mm": 82.0,
+    "antarctica_mm": 41.0,
+    "total_mm": 123.0,
+    "low_mm": 90.0,
+    "high_mm": 160.0,
+    "conversion_gt_per_mm": 362,
+    "baseline": "Mass anomaly relative to the first GRACE sample, converted as mm = -mass_gt / 362. total_mm = greenland_mm + antarctica_mm. low_mm and high_mm are totals.",
+    "source": "nasa-science-summary-fallback"
+  }
+}

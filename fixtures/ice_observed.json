@@ -1,0 +1,37 @@
+{
+  "pole": "north",
+  "year": 2024,
+  "month": 9,
+  "scenario": "ssp245",
+  "blend": null,
+  "band": "median",
+  "fixture": true,
+  "fixture_notice": "DEV FIXTURE — not an observation and not a forecast. Generated for parallel UI work.",
+  "generated_at": "2026-11-19T23:00:00Z",
+  "is_forecast": false,
+  "source": "nsidc-g02135",
+  "stale": false,
+  "gap_masked": false,
+  "regressor": "cumulative_co2_gt",
+  "observed_through": { "year": 2024, "month": 9 },
+  "extent_km2": 4280000,
+  "area_km2": 2910000,
+  "extent_method": "nsidc_monthly_csv",
+  "extent_scale": 1.0,
+  "pole_hole_cells": 3,
+  "units": {
+    "concentration": "percent",
+    "extent": "km2",
+    "area": "km2"
+  },
+  "grid": {
+    "projection": "EPSG:3413",
+    "nominal_resolution_m": 25000,
+    "width": 8,
+    "height": 8,
+    "origin": "upper-left",
+    "encoding": "row-major-uint8",
+    "masked_value": 255
+  },
+  "values_b64": "////////////AAAUUF////8AKFpkZEb//w9VZGRaKP//AB5GUDIA//8AAAoUAAD//////////////////////w=="
+}

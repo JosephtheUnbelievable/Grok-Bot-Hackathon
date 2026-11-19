@@ -1,0 +1,26 @@
+{
+  "fixture": true,
+  "fixture_notice": "DEV FIXTURE — not an observation and not a forecast. Generated for parallel UI work.",
+  "generated_at": "2026-11-19T23:00:00Z",
+  "stale": false,
+  "trained": true,
+  "train_end_year": 2010,
+  "eval_start_year": 2011,
+  "eval_end_year": 2024,
+  "regressor": "cumulative_co2_gt",
+  "metric": "rmse of scaled modeled September extent against the NSIDC monthly CSV",
+  "by_pole": {
+    "north": {
+      "rmse_km2": 480000,
+      "bias_km2": -120000,
+      "n_months": 14,
+      "skill_vs_climatology": 0.35
+    },
+    "south": {
+      "rmse_km2": 620000,
+      "bias_km2": 80000,
+      "n_months": 14,
+      "skill_vs_climatology": 0.1
+    }
+  }
+}
