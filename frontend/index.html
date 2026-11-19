@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ice on Earth</title>
+    <meta
+      name="description"
+      content="Sea ice at both poles from 1979 to 2100, with five SSP scenarios and ice-sheet sea level."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Public+Sans:ital,wght@0,400;0,500;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <p id="banner" class="banner" hidden></p>
+      <header class="top">
+        <div class="brand">
+          <p class="kicker">Sea ice and ice sheets</p>
+          <h1>Ice on Earth</h1>
+        </div>
+        <div class="top-status">
+          <p id="mode-pill" class="pill">—</p>
+          <p id="health-pill" class="pill pill-quiet">—</p>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="stage">
+          <div class="globe-frame">
+            <div
+              id="globe"
+              role="img"
+              tabindex="0"
+              aria-label="Globe. Drag to rotate. Both poles are reachable. Arrow keys rotate when this globe is focused."
+            ></div>
+            <div class="view-row">
+              <button type="button" id="view-north">North pole</button>
+              <button type="button" id="view-south">South pole</button>
+              <p class="hint">Drag to rotate</p>
+            </div>
+          </div>
+          <div class="readout">
+            <p class="extent-line">
+              <span id="extent-value" class="extent-value">—</span>
+              <span id="extent-unit" class="extent-unit">million km²</span>
+            </p>
+            <p id="when" class="when">—</p>
+            <p id="source-line" class="source"></p>
+            <p id="basemap-line" class="source"></p>
+            <div id="legend" class="legend" hidden>
+              <span class="swatch" style="background: #5dade2"></span>
+              <span>15%</span>
+              <span class="ramp" aria-hidden="true"></span>
+              <span class="swatch swatch-ice"></span>
+              <span>100%</span>
+              <span class="legend-name">Sea-ice concentration. Open water is not drawn.</span>
+            </div>
+            <div id="chart"></div>
+          </div>
+        </section>
+
+        <aside class="panel" aria-live="polite">
+          <div id="panel-body"></div>
+          <div id="panel-down" class="down" hidden>
+            <p class="kicker">Service</p>
+            <h2>Feed down</h2>
+            <p>
+              The ice service did not answer. The globe keeps the last image it received.
+              Sliders still move.
+            </p>
+          </div>
+        </aside>
+      </main>
+
+      <form class="controls" id="controls" autocomplete="off">
+        <div class="control">
+          <div class="control-head">
+            <label for="year">Year</label>
+            <output id="year-out" for="year">2024</output>
+          </div>
+          <div class="slider">
+            <input
+              id="year"
+              type="range"
+              min="1979"
+              max="2100"
+              step="1"
+              value="2024"
+              aria-valuemin="1979"
+              aria-valuemax="2100"
+              aria-valuenow="2024"
+              aria-valuetext="2024"
+            />
+            <span id="today-tick" class="today-tick" hidden></span>
+          </div>
+          <div class="ends">
+            <span>1979</span>
+            <span id="record-label"></span>
+            <span>2100</span>
+          </div>
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="month">Month</label>
+            <output id="month-out" for="month">September</output>
+          </div>
+          <input
+            id="month"
+            type="range"
+            min="1"
+            max="12"
+            step="1"
+            value="9"
+            aria-valuemin="1"
+            aria-valuemax="12"
+            aria-valuenow="9"
+            aria-valuetext="September"
+          />
+          <div class="ends"><span>1</span><span>12</span></div>
+        </div>
+
+        <div class="control control-scenario">
+          <div class="control-head">
+            <label for="blend">Scenario</label>
+            <output id="blend-out" for="blend">blend 2.0</output>
+          </div>
+          <input
+            id="blend"
+            type="range"
+            min="0"
+            max="4"
+            step="0.1"
+            value="2"
+            aria-valuemin="0"
+            aria-valuemax="4"
+            aria-valuenow="2"
+            aria-valuetext="SSP2-4.5, blend 2.0"
+          />
+          <div class="stops">
+            <span>SSP1-1.9</span>
+            <span>SSP1-2.6</span>
+            <span>SSP2-4.5</span>
+            <span>SSP3-7.0</span>
+            <span>SSP5-8.5</span>
+          </div>
+          <p id="scenario-help" class="help"></p>
+        </div>
+
+        <div class="control choices">
+          <fieldset>
+            <legend>Pole</legend>
+            <label class="choice">
+              <input type="radio" name="pole" value="north" checked />
+              <span>North</span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="pole" value="south" />
+              <span>South</span>
+            </label>
+          </fieldset>
+          <fieldset>
+            <legend>Band</legend>
+            <label class="choice">
+              <input type="radio" name="band" value="median" checked />
+              <span>Median</span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="band" value="low" />
+              <span>Low</span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="band" value="high" />
+              <span>High</span>
+            </label>
+          </fieldset>
+          <p id="model-note" class="help" hidden>Forecast model is not ready.</p>
+        </div>
+      </form>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
