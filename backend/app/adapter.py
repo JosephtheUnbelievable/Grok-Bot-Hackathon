@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import traceback
 
 from app.fallback_model import (
     BacktestResult,
@@ -48,10 +49,22 @@ class ModelAdapter:
         self._fallback = FallbackIceModel()
         self._real = None
         self._real_ready = False
+        self.last_error = IMPORT_ERROR or None
 
     @property
     def model_ready(self) -> bool:
         return self._real_ready
+
+    @property
+    def model_error(self) -> str | None:
+        return self.last_error
+
+    @property
+    def forecast_source(self) -> str:
+        if self._real_ready:
+            return "model.ice_model"
+        reason = self.last_error or "model.ice_model is not importable"
+        return f"linear-trend-fallback ({reason})"
 
     def update_from_store(self, store) -> None:
         fallback_bundle = _bundle(store, MonthlyGrid, MassPoint, TrainingBundle, placeholders=True)
@@ -65,10 +78,14 @@ class ModelAdapter:
                 real = RealIceModel()
                 real.update(real_bundle)
                 ready = True
-            except Exception:
+            except Exception as exc:
                 logger.exception("IceModel.update failed; keeping the linear-trend fallback")
+                self.last_error = f"update: {type(exc).__name__}: {exc}\n{traceback.format_exc()}"
                 real = None
                 ready = False
+            else:
+                self.last_error = None
+        fallback.attach_georef(store.iter_grids())
         with self._lock:
             self._fallback = fallback
             self._real = real
@@ -80,34 +97,42 @@ class ModelAdapter:
                 return self._real
             return self._fallback
 
+    def _note(self, where: str, exc: BaseException) -> None:
+        logger.exception("%s failed; using linear-trend fallback", where)
+        self.last_error = f"{where}: {type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+
     def concentration(self, req: GridRequest) -> ConcentrationGrid:
         try:
             return self._active().concentration(req)
-        except Exception:
-            logger.exception("concentration failed")
-            return ConcentrationGrid(
-                8, 8, bytes([255]) * 64, None, 1.0, True, False, 0, "model-not-ready"
-            )
+        except Exception as exc:
+            self._note("concentration", exc)
+            try:
+                return self._fallback.concentration(req)
+            except Exception as inner:
+                self._note("concentration fallback", inner)
+                return ConcentrationGrid(
+                    8, 8, bytes([255]) * 64, None, 1.0, True, False, 0, "model-not-ready"
+                )
 
     def extent_series(self, pole, month, scenario, blend):
         try:
             return list(self._active().extent_series(pole, month, scenario, blend))
-        except Exception:
-            logger.exception("extent_series failed")
+        except Exception as exc:
+            self._note("extent_series", exc)
             return self._fallback.extent_series(pole, month, scenario, blend)
 
     def impact(self, year, scenario, blend) -> ImpactResult:
         try:
             return self._active().impact(year, scenario, blend)
-        except Exception:
-            logger.exception("impact failed")
+        except Exception as exc:
+            self._note("impact", exc)
             return self._fallback.impact(year, scenario, blend)
 
     def backtest(self) -> BacktestResult:
         try:
             return self._active().backtest()
-        except Exception:
-            logger.exception("backtest failed")
+        except Exception as exc:
+            self._note("backtest", exc)
             return self._fallback.backtest()
 
 

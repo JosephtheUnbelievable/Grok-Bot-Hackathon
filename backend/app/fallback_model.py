@@ -97,6 +97,7 @@ class ShippingSeason:
     open_season_days: int
     opening_date: str | None
     open_month_count: int
+    method: str = ""
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,8 @@ class ImpactResult:
     northwest_passage: ShippingSeason
     ice_free_september_year: int | None
     winter_ice_loss_index: float | None
+    winter_method: str
+    community_february: dict | None
     greenland_mm: float
     antarctica_mm: float
     total_mm: float
@@ -132,8 +135,8 @@ class BacktestResult:
     south: PoleScore
 
 
-def _empty_season() -> ShippingSeason:
-    return ShippingSeason(0, None, 0)
+def _empty_season(method: str = "") -> ShippingSeason:
+    return ShippingSeason(0, None, 0, method)
 
 
 class FallbackIceModel:
@@ -174,7 +177,17 @@ class FallbackIceModel:
         self.grace_g = list(bundle.grace_greenland or [])
         self.grace_a = list(bundle.grace_antarctica or [])
         self.obs = obs
+        self.geo: dict[tuple[int, int], object] = {}
         self._ready = True
+
+    def attach_georef(self, items) -> None:
+        """North CleanGrids keyed by (year, month), for the corridor fallback."""
+        geo = {}
+        for item in items:
+            if item.pole != "north" or item.grid.origin_x is None:
+                continue
+            geo[(item.year, item.month)] = item.grid
+        self.geo = geo
 
     def _forecast(self, year: int, month: int) -> bool:
         if self.obs is None:
@@ -219,9 +232,9 @@ class FallbackIceModel:
                 except Exception:
                     factor = 1.0
             median = max(0.0, float(last_ext) + delta * factor)
-        median = min(median, 25_000_000.0)
-        low = max(0.0, median - Z90 * sigma)
-        high = min(25_000_000.0, median + Z90 * sigma)
+        median = min(max(0.0, median), 25_000_000.0)
+        low = min(max(0.0, median - Z90 * sigma), median)
+        high = min(max(median, median + Z90 * sigma), 25_000_000.0)
         return median, low, high
 
     def _masked(self, width: int, height: int, *, forecast: bool, gap: bool, source: str) -> ConcentrationGrid:
@@ -310,6 +323,10 @@ class FallbackIceModel:
                 points.append(ExtentPoint(year, extent, None, None, False, False, "nsidc-g02135", "nsidc_monthly_csv"))
                 continue
             median, low, high = self._trend_extent(pole, month, year, scenario, blend)
+            if median is not None:
+                median = max(0.0, float(median))
+                low = max(0.0, float(low if low is not None else median))
+                high = max(low, float(high if high is not None else median))
             points.append(
                 ExtentPoint(year, median, low, high, True, False, "model-forecast", "model_cell_sum_scaled")
             )
@@ -324,12 +341,15 @@ class FallbackIceModel:
         g_mm, a_mm, source = _sea_level(year, scenario, blend, self.warming, self.grace_g, self.grace_a)
         total = g_mm + a_mm
         forecast = self.obs is None or year > self.obs[0]
+        nsr, nwp, winter, places, wmethod = self._corridors(year, scenario, blend, forecast)
         return ImpactResult(
             is_forecast=forecast,
-            northern_sea_route=_empty_season(),
-            northwest_passage=_empty_season(),
+            northern_sea_route=nsr,
+            northwest_passage=nwp,
             ice_free_september_year=ice_free,
-            winter_ice_loss_index=None,
+            winter_ice_loss_index=winter,
+            winter_method=wmethod,
+            community_february=places,
             greenland_mm=g_mm,
             antarctica_mm=a_mm,
             total_mm=total,
@@ -337,6 +357,81 @@ class FallbackIceModel:
             high_mm=total,
             sea_level_source=source,
         )
+
+    def _grid_for_month(self, year: int, month: int, scenario: str, blend: float | None, forecast: bool):
+        if not forecast:
+            grid = self.geo.get((year, month))
+            if grid is None:
+                return None
+            return grid, grid.array()
+        candidates = [item for (y, m), item in self.geo.items() if m == month]
+        if not candidates:
+            return None
+        grid = candidates[-1] if len(candidates) == 1 else max(
+            ((y, self.geo[(y, month)]) for y in {yy for (yy, mm) in self.geo if mm == month}),
+            key=lambda pair: pair[0],
+        )[1]
+        median, _low, _high = self._trend_extent("north", month, year, scenario, blend)
+        target = 0.0 if median is None else max(0.0, float(median))
+        adjusted, _extent, _scale = _adjust(grid.values, grid.width, grid.height, target)
+        arr = np.frombuffer(adjusted, dtype=np.uint8).reshape(grid.height, grid.width)
+        return grid, arr
+
+    def _corridors(self, year, scenario, blend, forecast):
+        from app.corridors import (
+            COMMUNITIES,
+            METHOD,
+            NSR,
+            NWP,
+            WINTER_METHOD,
+            corridor_mask,
+            open_fraction,
+            sample_ocean,
+            season_from_fractions,
+        )
+
+        if not self.geo:
+            empty = _empty_season(METHOD + " No north concentration grid is loaded.")
+            return empty, empty, None, None, WINTER_METHOD + " No February grid is loaded."
+        nsr_frac, nwp_frac = {}, {}
+        for month in range(1, 13):
+            got = self._grid_for_month(year, month, scenario, blend, forecast)
+            if got is None:
+                continue
+            grid, values = got
+            ocean = values != 255
+            nsr_mask = corridor_mask(grid, NSR) & ocean
+            nwp_mask = corridor_mask(grid, NWP) & ocean
+            nsr_f = open_fraction(values, nsr_mask)
+            nwp_f = open_fraction(values, nwp_mask)
+            if nsr_f is not None:
+                nsr_frac[month] = nsr_f
+            if nwp_f is not None:
+                nwp_frac[month] = nwp_f
+        nsr_days, nsr_open, nsr_count = season_from_fractions(year, nsr_frac)
+        nwp_days, nwp_open, nwp_count = season_from_fractions(year, nwp_frac)
+        note = "" if len(nsr_frac) >= 10 else f" Partial: {len(nsr_frac)} of 12 months."
+        nsr = ShippingSeason(max(0, nsr_days), nsr_open, nsr_count, METHOD + note)
+        nwp = ShippingSeason(max(0, nwp_days), nwp_open, nwp_count, METHOD + note)
+        feb = self._grid_for_month(year, 2, scenario, blend, forecast)
+        places = {}
+        if feb is None:
+            return nsr, nwp, None, None, WINTER_METHOD + " No February grid is loaded."
+        grid, values = feb
+        lost = 0
+        usable = 0
+        for name, (lat, lon) in COMMUNITIES.items():
+            conc = sample_ocean(grid, values, lat, lon)
+            if conc is None:
+                places[name] = None
+                continue
+            conc_i = int(max(0, min(100, round(conc))))
+            below = conc_i < 15
+            usable += 1
+            lost += int(below)
+            places[name] = {"february_percent": conc_i, "below_15": below}
+        winter = None if usable == 0 else lost / usable
+        return nsr, nwp, winter, places, WINTER_METHOD
 
     def backtest(self) -> BacktestResult:
         north = _score_pole(self.rows, "north", self.obs)
@@ -363,8 +458,11 @@ def _adjust(values: bytes, width: int, height: int, target_km2: float) -> tuple[
         if marg.size:
             mord = marg[np.argsort(arr.flat[marg], kind="stable")[::-1]]
             arr.flat[mord[: target_n - n_ice]] = 15
+    bad = (arr > 100) & (arr < 255)
+    arr[bad] = 255
     n = int(((arr >= 15) & (arr <= 100)).sum())
-    return np.ascontiguousarray(arr).tobytes(), float(n * CELL_KM2), 1.0
+    extent = max(0.0, float(n * CELL_KM2))
+    return np.ascontiguousarray(arr).tobytes(), extent, 1.0
 
 
 def _sheet_mm(rate: float, year: int, warming: dict, scenario: str, blend: float | None) -> float:

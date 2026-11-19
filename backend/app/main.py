@@ -137,7 +137,9 @@ def create_app(store: DataStore | None = None, adapter: ModelAdapter | None = No
     def health():
         store_ = application.state.store
         adapter_ = application.state.adapter
-        return JSONResponse(store_.health(adapter_.model_ready))
+        return JSONResponse(
+            store_.health(adapter_.model_ready, adapter_.model_error, adapter_.forecast_source)
+        )
 
     @application.get("/ice/{pole}/{year}/{month}")
     def ice(pole: str, year: str, month: str, request: Request):
@@ -595,22 +597,14 @@ def _impact_response(application, year, scenario, blend, left):
         "regressor": store.regressor,
         "observed_through": _obs_json(store),
         "shipping": {
-            "northern_sea_route": {
-                "open_season_days": int(result.northern_sea_route.open_season_days),
-                "opening_date": result.northern_sea_route.opening_date,
-                "open_month_count": int(result.northern_sea_route.open_month_count),
-                "definition": NSR_DEFINITION,
-            },
-            "northwest_passage": {
-                "open_season_days": int(result.northwest_passage.open_season_days),
-                "opening_date": result.northwest_passage.opening_date,
-                "open_month_count": int(result.northwest_passage.open_month_count),
-                "definition": NWP_DEFINITION,
-            },
+            "northern_sea_route": _season_json(result.northern_sea_route, NSR_DEFINITION),
+            "northwest_passage": _season_json(result.northwest_passage, NWP_DEFINITION),
         },
         "communities": {
             "ice_free_september_year": result.ice_free_september_year,
             "winter_ice_loss_index": result.winter_ice_loss_index,
+            "winter_method": getattr(result, "winter_method", "") or "",
+            "places": getattr(result, "community_february", None),
             "definitions": {
                 "ice_free_september_year": ICE_FREE_DEFINITION,
                 "winter_ice_loss_index": WINTER_DEFINITION,
@@ -667,6 +661,16 @@ def _score_json(score) -> dict:
         "bias_km2": score.bias_km2,
         "n_months": score.n_months,
         "skill_vs_climatology": score.skill_vs_climatology,
+    }
+
+
+def _season_json(season, definition: str) -> dict:
+    return {
+        "open_season_days": max(0, int(season.open_season_days)),
+        "opening_date": season.opening_date,
+        "open_month_count": max(0, int(season.open_month_count)),
+        "definition": definition,
+        "method": getattr(season, "method", "") or "",
     }
 
 

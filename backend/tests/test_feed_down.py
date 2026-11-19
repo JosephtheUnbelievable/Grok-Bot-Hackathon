@@ -22,7 +22,7 @@ class DownClient:
 MONTHLY = (
     "year, mo, source_dataset, region, extent, area\n"
     "1979,  9, NSIDC-0051, N, 7.05, 4.58\n"
-    "1987, 12, -9999, N, -9999, -9999\n"
+    "1987,  9, NSIDC-0051, N, 7.28, 5.10\n"
     "2010,  9, NSIDC-0051, N, 4.90, 3.20\n"
     "2020,  9, NSIDC-0051, N, 4.00, 2.50\n"
 )
@@ -75,6 +75,8 @@ def test_health_stays_up_and_flags_the_cache(tmp_path):
     assert monthly["status"] in {"stale", "down"}
     assert "model_ready" in body
     assert body["model_ready"] is False
+    assert body["forecast_source"].startswith("linear-trend-fallback")
+    assert body["model_error"]
 
 
 def test_gap_and_bad_year_and_extent_from_cache(tmp_path):
@@ -102,9 +104,23 @@ def test_gap_and_bad_year_and_extent_from_cache(tmp_path):
     series = {row["year"]: row for row in extent.json()["series"]}
     assert series[1979]["extent_km2"] == 7_050_000
     assert series[1979]["is_forecast"] is False
-    assert series[1987]["extent_km2"] == 7_050_000 or series[1987]["gap_masked"] is False
+    assert series[1987]["gap_masked"] is False
+    assert series[1987]["extent_km2"] == 7_280_000
     assert series[2100]["is_forecast"] is True
+    assert series[2100]["extent_km2"] is None or series[2100]["extent_km2"] >= 0
+    assert series[2050]["low_km2"] is None or series[2050]["low_km2"] >= 0
     assert len(extent.json()["series"]) == 122
+
+    december = client.get("/extent/north?month=12")
+    assert december.status_code == 200
+    dec = {row["year"]: row for row in december.json()["series"]}
+    assert dec[1987]["gap_masked"] is True
+    assert dec[1987]["extent_km2"] is None
+
+    january = client.get("/ice/north/1988/1?format=json")
+    assert january.status_code == 200
+    assert january.json()["gap_masked"] is True
+    assert january.json()["extent_km2"] is None
 
     impact = client.get("/impact?year=2050&scenario=ssp245")
     assert impact.status_code == 200

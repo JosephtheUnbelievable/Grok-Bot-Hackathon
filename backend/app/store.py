@@ -26,7 +26,8 @@ from app.cleaning import (
     parse_monthly_csv,
     read_concentration_tif,
 )
-from app.ssp import warming_table
+from app.gistemp_fallback import GISTEMP_JD
+from app.ssp import GISTEMP_URL, parse_gistemp_csv, warming_table, warming_table_from_observations
 
 logger = logging.getLogger("ice.store")
 
@@ -144,6 +145,7 @@ class DataStore:
         self.observed_through: tuple[int, int] | None = None
         self.regressor = "ipcc_ar6_warming_c_fallback"
         self.warming = warming_table()
+        self.gistemp_source = "gistemp-v4-embedded"
         self.cumulative_co2: dict[int, float] = {}
         self.ssp_cumulative: dict[str, dict[int, float]] = {}
         self.grace_greenland: list[tuple[float, float, float | None]] = []
@@ -500,9 +502,41 @@ class DataStore:
         self.regressor = "ipcc_ar6_warming_c_fallback"
         self.cumulative_co2 = {}
         self.ssp_cumulative = {}
-        self.warming = warming_table()
-        why = f"IIASA timeseries HTTP {code or err}; ipcc_ar6_warming_c_fallback"
+        gistemp_note = self._load_gistemp(client)
+        why = (
+            f"IIASA timeseries HTTP {code or err}; cumulative CO2 unavailable; "
+            f"{gistemp_note}; ipcc_ar6_warming_c_fallback"
+        )
         self.feeds["ssp_pathways"] = _feed("stale", None, None, False, why)
+
+    def _load_gistemp(self, client) -> str:
+        path = self._cache_file("gistemp", "GLB.Ts+dSST.csv")
+        series = None
+        source = "gistemp-v4-embedded"
+        try:
+            status, body, _headers = self._download(client, GISTEMP_URL)
+            if status == 200 and b"J-D" in body[:4000] or (status == 200 and b"J-D" in body):
+                parsed = parse_gistemp_csv(body.decode("utf-8", errors="replace"))
+                if len(parsed) >= 30:
+                    series = parsed
+                    self._write_cache(path, body, None)
+                    source = "gistemp-v4"
+        except Exception:
+            logger.exception("gistemp fetch failed")
+        if series is None:
+            cached = self._read_cache(path)
+            if cached:
+                parsed = parse_gistemp_csv(cached[0].decode("utf-8", errors="replace"))
+                if len(parsed) >= 30:
+                    series = parsed
+                    source = "gistemp-v4-cache"
+        if series is None:
+            series = dict(GISTEMP_JD)
+            source = "gistemp-v4-embedded"
+        self.warming = warming_table_from_observations(series)
+        self.gistemp_source = source
+        last = max(series)
+        return f"{source} through {last}"
 
     def _prefetch_grids(self, client) -> None:
         wanted = []
@@ -517,6 +551,15 @@ class DataStore:
                 wanted.append((pole, max(years), default_month))
         # A known-good September, so /ice/north/2024/9 works even if the newest tif lags.
         wanted.append(("north", 2024, 9))
+        # One recent north grid per calendar month so corridor fallbacks have a template.
+        for month in range(1, 13):
+            years = [
+                y
+                for (p, y, m), rec in monthly.items()
+                if p == "north" and m == month and rec.extent_km2 is not None and not rec.gap_masked
+            ]
+            if years:
+                wanted.append(("north", max(years), month))
         seen = set()
         unique = []
         for item in wanted:
@@ -646,7 +689,7 @@ class DataStore:
     def ice_can_answer(self) -> bool:
         return self.has_monthly() or bool(self.grids)
 
-    def health(self, model_ready: bool) -> dict:
+    def health(self, model_ready: bool, model_error: str | None = None, forecast_source: str | None = None) -> dict:
         feeds = {name: dict(self.feeds.get(name) or _blank_feed()) for name in FEED_IDS}
         statuses = [item["status"] for item in feeds.values()]
         if all(status == "ok" for status in statuses):
@@ -665,6 +708,11 @@ class DataStore:
             "observed_through": obs,
             "regressor": self.regressor,
             "model_ready": model_ready,
+            "model_error": model_error,
+            "forecast_source": forecast_source or (
+                "model.ice_model" if model_ready else "linear-trend-fallback"
+            ),
+            "gistemp_source": self.gistemp_source,
             "feeds": feeds,
         }
 

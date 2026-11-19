@@ -5,6 +5,9 @@ import io
 import numpy as np
 import tifffile
 
+from app.corridors import season_from_fractions
+from app.fallback_model import FallbackIceModel, MonthlyGrid, TrainingBundle
+from app.ssp import warming_table
 from app.cleaning import (
     is_gap_day,
     is_gap_month,
@@ -88,3 +91,38 @@ def test_geotiff_class_values_never_survive():
     assert grid.pole_hole_cells == 1
     assert grid.width == 3 and grid.height == 3
     assert 2510 not in np.frombuffer(grid.values, dtype=np.uint8)
+
+
+def test_gistemp_history_then_scenarios_diverge():
+    table = warming_table()
+    assert abs(table["ssp585"][2020] - table["ssp126"][2020]) < 1e-9
+    assert table["ssp585"][2020] > 0.8
+    assert table["ssp585"][2050] > table["ssp126"][2050]
+    assert table["ssp585"][2080] > table["ssp245"][2080] > table["ssp126"][2080]
+    assert table["ssp119"][2090] == 1.4
+    assert table["ssp585"][2100] == 4.4
+
+
+def test_open_water_fraction_becomes_days():
+    days, opening, count = season_from_fractions(2050, {month: 1.0 for month in range(1, 13)})
+    assert days == 11 * 30 + 28
+    assert opening == "2050-06-01"
+    assert count == 12
+    days0, opening0, count0 = season_from_fractions(2050, {month: 0.0 for month in range(1, 13)})
+    assert days0 == 0 and opening0 is None and count0 == 0
+
+
+def test_forecast_extents_stay_non_negative():
+    grids = [
+        MonthlyGrid("north", year, 9, 1, 1, b"\xff", extent, None, False, 0)
+        for year, extent in ((2000, 5_000_000), (2010, 2_000_000), (2020, 500_000))
+    ]
+    bundle = TrainingBundle(grids, {}, {}, warming_table(), [], [], None, "ipcc_ar6_warming_c_fallback")
+    model = FallbackIceModel()
+    model.update(bundle)
+    for scenario in ("ssp126", "ssp585"):
+        points = model.extent_series("north", 9, scenario, None)
+        assert points[-1].extent_km2 >= 0
+        assert points[-1].low_km2 >= 0
+        assert all(p.extent_km2 is None or p.extent_km2 >= 0 for p in points)
+        assert all(p.low_km2 is None or p.low_km2 >= 0 for p in points)

@@ -28,8 +28,9 @@ Cache is `backend/cache/` (gitignored). A failed fetch serves the last good byte
 _Do not edit API.md from this branch. Notes for the checkpoint:_
 
 - When `import model.ice_model` fails, `/health` reports `model_ready: false`, but forecast `/extent`, `/impact`, and `/ice` are still filled by a linear trend on the fetched NSIDC monthly series (source `model-forecast`, `stale: true`). The brief also describes a fully masked `model-not-ready` grid. Confirm which one the globe should treat as the checkpoint forecast. A forecast month with no concentration template still returns `source: "model-not-ready"`.
-- IPCC fallback warming is 1.5 °C for every year through 2040 (including 1979–2020), linear from 2040 to the 2081–2100 anchor, then flat. AR6 does not specify the pre-2021 values.
+- Warming history is NASA GISTEMP v4 (J-D), shifted so the 1880–1900 mean is 0 °C, then spliced from the last observed year to each SSP's 2081–2100 anchor in 2090. Cumulative CO2 is not the regressor: the IIASA timeseries route returned HTTP 500 and no Global Carbon Budget series was joined (`regressor: ipcc_ar6_warming_c_fallback`).
+- Shipping days and the winter index, while the model package is absent, come from concentration grids: the share of corridor cells below 15% (Northern Sea Route and Northwest Passage), and February ocean cells near Utqiagvik, Kivalina, Shishmaref, and Tuktoyaktuk. Each block has a `method` string. `IceModel.impact` is used instead once that package loads.
 - With no GRACE samples, `low_mm` and `high_mm` equal `total_mm`. There are no residuals to bootstrap. Rates are −264 and −135 Gt/yr from 2002.
-- The fallback does not compute the shipping corridors or the winter-ice index (both need many concentration grids and the model’s lat/lon boxes). Those fields are 0 / null, with the API.md definition strings copied through. `ice_free_september_year` comes from the September extent trend.
+- `ice_free_september_year` still comes from the September extent trend. `/health` adds `model_error`, `forecast_source`, and `gistemp_source` so a silent fallback is visible.
 - `EARTHDATA_TOKEN` is read as a Bearer token, in addition to `EARTHDATA_USERNAME` / `EARTHDATA_PASSWORD`.
 - Monthly staleness uses the 1st of the newest real month and the 45-day window from API.md.
