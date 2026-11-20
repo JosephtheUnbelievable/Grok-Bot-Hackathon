@@ -46,6 +46,8 @@ Replace the ice-sheet extrapolation with [ISSM](https://issm.jpl.nasa.gov/) (Ice
 
 _Fill in during the last 5 minutes. Export each assistant session and point at it from here._
 
+[Grok Bot session export](GROKBOT_SESSION.md)
+
 ## How to run it
 
 _The three roles add real dependency files inside their own folders. Commands below are the agreed interface; they will fail until those files exist._
