@@ -26,7 +26,7 @@ export function createGlobe(container) {
     metalness: 0,
   });
   const photoMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const earth = new THREE.Mesh(new THREE.SphereGeometry(1, 80, 56), fallbackMat);
+  const earth = new THREE.Mesh(new THREE.SphereGeometry(1, 160, 120), fallbackMat);
   scene.add(earth);
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -42,7 +42,7 @@ export function createGlobe(container) {
       depthWrite: false,
       opacity: 0,
     });
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.004, 80, 56), material);
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.003, 160, 120), material);
     mesh.renderOrder = 2;
     mesh.visible = false;
     scene.add(mesh);
@@ -55,7 +55,7 @@ export function createGlobe(container) {
   let fade = null;
 
   const atmosphere = new THREE.Mesh(
-    new THREE.SphereGeometry(1.065, 64, 48),
+    new THREE.SphereGeometry(1.028, 80, 60),
     new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -76,8 +76,8 @@ export function createGlobe(container) {
         varying vec3 vView;
         uniform vec3 color;
         void main() {
-          float rim = pow(clamp(0.55 - dot(normalize(vNormal), normalize(vView)), 0.0, 1.0), 2.4);
-          gl_FragColor = vec4(color, rim * 0.42);
+          float rim = pow(clamp(0.35 - dot(normalize(vNormal), normalize(vView)), 0.0, 1.0), 3.2);
+          gl_FragColor = vec4(color, rim * 0.55);
         }
       `,
     }),
@@ -155,7 +155,9 @@ export function createGlobe(container) {
     }
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 8;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
     tex.needsUpdate = true;
     showIce(tex);
   }
@@ -172,7 +174,9 @@ export function createGlobe(container) {
           return;
         }
         tex.colorSpace = THREE.SRGBColorSpace;
-        tex.anisotropy = 8;
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        tex.magFilter = THREE.LinearFilter;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
         showIce(tex);
       },
       undefined,
@@ -193,6 +197,9 @@ export function createGlobe(container) {
       (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = true;
         photoMat.map = tex;
         photoMat.needsUpdate = true;
         earth.material = photoMat;
@@ -279,7 +286,7 @@ export function createGlobe(container) {
   function fitRadius() {
     const vFov = (camera.fov * Math.PI) / 180;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(camera.aspect, 0.2));
-    const margin = 1.16;
+    const margin = 1.06;
     return Math.max(margin / Math.tan(vFov / 2), margin / Math.tan(hFov / 2));
   }
 
@@ -391,17 +398,16 @@ function makeGraticule() {
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   const lines = new THREE.LineSegments(
     geometry,
-    new THREE.LineBasicMaterial({ color: 0xb7c4c0, transparent: true, opacity: 0.16, depthWrite: false }),
+    new THREE.LineBasicMaterial({ color: 0xc5d0cc, transparent: true, opacity: 0.07, depthWrite: false }),
   );
   lines.renderOrder = 3;
   return lines;
 }
 
-function makeStars() {
-  const count = 160;
+function starShell(count, radiusMin, radiusSpan) {
   const positions = new Float32Array(count * 3);
   for (let i = 0; i < count; i += 1) {
-    const radius = 18 + Math.random() * 10;
+    const radius = radiusMin + Math.random() * radiusSpan;
     const theta = Math.acos(2 * Math.random() - 1);
     const phi = Math.random() * Math.PI * 2;
     positions[i * 3] = radius * Math.sin(theta) * Math.cos(phi);
@@ -410,17 +416,54 @@ function makeStars() {
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  return new THREE.Points(
-    geometry,
+  return geometry;
+}
+
+function starSprite() {
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const mid = size / 2;
+  const gradient = ctx.createRadialGradient(mid, mid, 0, mid, mid, mid);
+  gradient.addColorStop(0, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.12, "rgba(255,255,255,0.95)");
+  gradient.addColorStop(0.28, "rgba(255,255,255,0.28)");
+  gradient.addColorStop(0.55, "rgba(255,255,255,0.06)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function addStars(sky, sprite, { count, size, color, opacity }) {
+  sky.add(new THREE.Points(
+    starShell(count, 15, 14),
     new THREE.PointsMaterial({
-      color: 0xd5d0c4,
-      size: 1.15,
+      map: sprite,
+      color,
+      size,
+      opacity,
       sizeAttenuation: false,
-      transparent: true,
-      opacity: 0.38,
       depthWrite: false,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
     }),
-  );
+  ));
+}
+
+function makeStars() {
+  const sky = new THREE.Group();
+  const sprite = starSprite();
+  addStars(sky, sprite, { count: 46, size: 10, color: 0xffffff, opacity: 0.95 });
+  addStars(sky, sprite, { count: 80, size: 7, color: 0xc9dcff, opacity: 0.8 });
+  addStars(sky, sprite, { count: 32, size: 12, color: 0xffe2a8, opacity: 0.9 });
+  addStars(sky, sprite, { count: 24, size: 9, color: 0xffb06a, opacity: 0.85 });
+  return sky;
 }
 
 function makeRoute(lat, lon0, lon1) {
