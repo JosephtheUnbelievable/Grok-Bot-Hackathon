@@ -25,6 +25,7 @@ import {
   sourceLabel,
 } from "./format.js";
 import { createGlobe } from "./globe.js";
+import { shipFacts } from "../../ships/web/shipLayer.js";
 
 const state = {
   pole: "north",
@@ -52,14 +53,95 @@ const monthInput = $("month");
 const blendInput = $("blend");
 
 let globe = null;
+let pickedShip = null;
 try {
-  globe = createGlobe($("globe"));
+  globe = createGlobe($("globe"), { apiBase: API_BASE });
 } catch (err) {
   $("globe").textContent = "The globe could not start.";
   console.error(err);
 }
 
 $("controls").addEventListener("submit", (event) => event.preventDefault());
+
+function renderShipCard(ship, shipState) {
+  const card = $("ship-card");
+  if (!card) return;
+  if (!ship) {
+    card.hidden = true;
+    card.replaceChildren();
+    return;
+  }
+  const facts = shipFacts(ship, Boolean(shipState?.stale));
+  card.hidden = false;
+  card.replaceChildren();
+  const head = el("div", "ship-head");
+  const swatch = el("span", "swatch");
+  swatch.style.background = facts.color;
+  const title = el("h2", null, ship.name || "Unnamed ship");
+  const close = el("button", "text-btn", "Close");
+  close.type = "button";
+  close.addEventListener("click", () => {
+    pickedShip = null;
+    globe?.selectShip(null);
+    renderShipCard(null);
+  });
+  head.append(swatch, title, close);
+  card.append(head);
+  for (const [label, value] of facts.rows) {
+    if (label === "Name") continue;
+    card.append(stat(label, value));
+  }
+  if (facts.note) card.append(el("p", "note", facts.note));
+}
+
+function renderShipsButton(shipState) {
+  const btn = $("ships-btn");
+  if (!btn) return;
+  const on = btn.getAttribute("aria-pressed") === "true";
+  if (!on) {
+    btn.textContent = "Ships";
+    btn.title = "Show live Arctic ships";
+    return;
+  }
+  if (shipState && !shipState.ok && !shipState.error && !shipState.health) {
+    btn.textContent = "Ships";
+    btn.title = "Live Arctic ships";
+    return;
+  }
+  if (!shipState || shipState.error || (shipState.health?.status === "down" && !shipState.count)) {
+    btn.textContent = "Ships · no feed";
+    btn.title = shipState?.health?.detail || shipState?.error || "Ship feed did not answer";
+    return;
+  }
+  const stale = shipState.stale ? " · stale" : "";
+  btn.textContent = `Ships · ${shipState.count}${stale}`;
+  btn.title = shipState.health?.detail || "Live Arctic ships";
+}
+
+$("ships-btn")?.addEventListener("click", () => {
+  const next = $("ships-btn").getAttribute("aria-pressed") !== "true";
+  $("ships-btn").setAttribute("aria-pressed", next ? "true" : "false");
+  globe?.setShipsVisible(next);
+  if (!next) {
+    pickedShip = null;
+    renderShipCard(null);
+  } else {
+    globe?.lookNorth();
+  }
+  renderShipsButton(globe?.shipState());
+});
+
+globe?.onShipPick((ship, shipState) => {
+  pickedShip = ship;
+  renderShipCard(ship, shipState);
+});
+globe?.onShips((shipState) => {
+  renderShipsButton(shipState);
+  if (!pickedShip) return;
+  const next = shipState.ships.find((ship) => ship.mmsi === pickedShip.mmsi) || null;
+  pickedShip = next;
+  renderShipCard(next, shipState);
+});
 
 function setDrawer(open) {
   $("drawer").hidden = !open;

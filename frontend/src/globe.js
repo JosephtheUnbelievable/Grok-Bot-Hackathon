@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { createShipLayer } from "../../ships/web/shipLayer.js";
 
-export function createGlobe(container) {
+export function createGlobe(container, { apiBase = "http://127.0.0.1:8000" } = {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -93,6 +94,34 @@ export function createGlobe(container) {
   const nwp = makeRoute(71, -140, -60);
   scene.add(nsr);
   scene.add(nwp);
+
+  let shipLayer = null;
+  let shipPickHandler = null;
+  try {
+    shipLayer = createShipLayer({
+      scene,
+      latLonToVector3: (lat, lon, radius) => latLon(lat, lon, radius),
+      apiBase,
+      globeRadius: 1,
+    });
+  } catch (err) {
+    console.error(err);
+  }
+
+  let pointerDown = null;
+  renderer.domElement.addEventListener("pointerdown", (event) => {
+    pointerDown = { x: event.clientX, y: event.clientY };
+  });
+  renderer.domElement.addEventListener("pointerup", (event) => {
+    if (!pointerDown || !shipLayer) return;
+    const dx = event.clientX - pointerDown.x;
+    const dy = event.clientY - pointerDown.y;
+    pointerDown = null;
+    if (dx * dx + dy * dy > 25) return;
+    const ship = shipLayer.pick(camera, event);
+    shipLayer.select(ship ? ship.mmsi : null);
+    shipPickHandler?.(ship, shipLayer.getState());
+  });
 
   const loader = new THREE.TextureLoader();
   loader.setCrossOrigin("anonymous");
@@ -333,6 +362,7 @@ export function createGlobe(container) {
         fade = null;
       }
     }
+    if (!reduceMotion) shipLayer?.update(now);
     renderer.render(scene, camera);
   }
   requestAnimationFrame(frame);
@@ -349,8 +379,30 @@ export function createGlobe(container) {
     lookSouth() {
       look(0, -89);
     },
+    setShipsVisible(on) {
+      shipLayer?.setVisible(on);
+      if (!on) {
+        shipLayer?.select(null);
+        shipPickHandler?.(null, shipLayer?.getState());
+      }
+    },
+    onShipPick(handler) {
+      shipPickHandler = handler;
+    },
+    onShips(handler) {
+      if (!shipLayer) return;
+      shipLayer.onChange = handler;
+      handler(shipLayer.getState());
+    },
+    selectShip(mmsi) {
+      shipLayer?.select(mmsi);
+    },
+    shipState() {
+      return shipLayer ? shipLayer.getState() : null;
+    },
     dispose() {
       running = false;
+      shipLayer?.dispose();
       observer.disconnect();
       renderer.dispose();
     },

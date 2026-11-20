@@ -689,3 +689,38 @@ def _feed_cache(store: DataStore, name: str) -> bool:
 
 
 app = create_app()
+
+
+def north_concentration_at(lat: float, lon: float):
+    """Percent on the newest observed north grid, or None when the cell is masked."""
+    import numpy as np
+
+    from app.corridors import sample_ocean
+
+    best = None
+    for item in app.state.store.iter_grids():
+        if item.pole != "north" or item.gap_masked:
+            continue
+        stamp = (item.year, item.month)
+        if best is None or stamp > best[0]:
+            best = (stamp, item.grid)
+    if best is None:
+        return None
+    grid = best[1]
+    values = np.frombuffer(grid.values, dtype=np.uint8).reshape(grid.height, grid.width)
+    sampled = sample_ocean(grid, values, float(lat), float(lon), radius=0)
+    if sampled is None:
+        return None
+    percent = float(sampled)
+    if percent < 0 or percent > 100:
+        return None
+    return percent
+
+
+# Task 4 mount. Ships owns the routes; this is the only backend edit.
+try:
+    from ships.router import install as install_ships
+
+    install_ships(app, concentration_at=north_concentration_at)
+except Exception:
+    logger.exception("ships router not installed")

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ships layer demo</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #121410; color: #e6e1d6; font-family: sans-serif; }
+      canvas { display: block; }
+      #hud {
+        position: absolute; left: 12px; top: 12px; max-width: 360px;
+        font-size: 13px; line-height: 1.4; white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">Loading the ship layer…</div>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { createShipLayer, shipFacts } from "./shipLayer.js";
+
+      const apiBase = new URLSearchParams(location.search).get("api") || "http://127.0.0.1:8099";
+      const hud = document.getElementById("hud");
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(innerWidth, innerHeight);
+      document.body.appendChild(renderer.domElement);
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 20);
+      camera.position.set(0, 1.2, 2.4);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      const globeRadius = 1;
+      scene.add(new THREE.Mesh(
+        new THREE.SphereGeometry(globeRadius, 48, 32),
+        new THREE.MeshPhongMaterial({ color: 0x1a3a4a }),
+      ));
+      scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+      const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+      sun.position.set(3, 2, 4);
+      scene.add(sun);
+
+      function latLonToVector3(lat, lon, radius = globeRadius) {
+        const phi = ((lon + 180) * Math.PI) / 180;
+        const theta = ((90 - lat) * Math.PI) / 180;
+        return new THREE.Vector3(
+          -Math.cos(phi) * Math.sin(theta) * radius,
+          Math.cos(theta) * radius,
+          Math.sin(phi) * Math.sin(theta) * radius,
+        );
+      }
+
+      // Labeled stand-ins so this page can be tried with no AIS key.
+      // The globe app does not pass allowPreview.
+      const previewShips = [
+        {
+          mmsi: "273000001", name: "DEMO CARGO", vessel_type: "cargo",
+          lat: 72, lon: 40, sog_kn: 12, cog_deg: 0, heading: 0,
+          last_seen: "demo", is_stale: false, icebreaker: false,
+          track: [{ lat: 71.4, lon: 40, t: "demo", source: "aisstream" }, { lat: 72, lon: 40, t: "demo", source: "aisstream" }],
+          ice_risk: { level: "clear", concentration_here: 0, concentration_ahead: 4, entering: false },
+        },
+        {
+          mmsi: "273000002", name: "DEMO TANKER", vessel_type: "tanker",
+          lat: 78, lon: -20, sog_kn: 8, cog_deg: 45, heading: 40,
+          last_seen: "demo", is_stale: false, icebreaker: false,
+          track: [{ lat: 77.6, lon: -21, t: "demo", source: "aisstream" }, { lat: 78, lon: -20, t: "demo", source: "aisstream" }],
+          ice_risk: { level: "heavy", concentration_here: 20, concentration_ahead: 60, entering: true },
+        },
+      ];
+
+      const ships = createShipLayer({
+        scene, latLonToVector3, apiBase, globeRadius,
+        allowPreview: true, previewShips,
+      });
+      ships.onChange = (state) => {
+        const label = state.preview ? "PREVIEW MARKERS — not a live AIS feed." : "Live /ships.";
+        hud.textContent = `${label}\n${apiBase}\n${state.count} ships${state.error ? `\n${state.error}` : ""}`;
+      };
+      renderer.domElement.addEventListener("pointerup", (event) => {
+        const ship = ships.pick(camera, event);
+        if (!ship) return;
+        ships.select(ship.mmsi);
+        const facts = shipFacts(ship, false);
+        hud.textContent = facts.rows.map(([k, v]) => `${k}: ${v}`).join("\n");
+      });
+
+      function frame(time) {
+        ships.update(time);
+        controls.update();
+        renderer.render(scene, camera);
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+    </script>
+  </body>
+</html>

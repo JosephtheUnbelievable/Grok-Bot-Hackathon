@@ -12,10 +12,15 @@ ships/
   router.py            # install(app, concentration_at=...), APIRouter, standalone app
   worker.py            # websocket, cleaning, reconnect
   ice.py               # heading projection and ice_risk
+  sample.py            # load_recorded_sample — tests only, not mounted
   requirements.txt
   testdata/ais_sample.jsonl   # recorded sample, unit tests only
   tests/test_ships.py
+  web/shipLayer.js     # Three.js layer the globe imports
+  web/demo.html        # bare sphere; preview markers are not a live feed
 ```
+
+The globe (`frontend/src/globe.js`) imports `web/shipLayer.js` and polls `GET /ships`. See `web/README.md` for the three-line mount.
 
 Run the tests from the repo root with `PYTHONPATH=.`. Run the standalone app on port **8099** so it does not take Role 1’s port 8000. `AISSTREAM_API_KEY` comes from the environment. The empty placeholder is in `.env.example`. A real key stays out of git.
 
