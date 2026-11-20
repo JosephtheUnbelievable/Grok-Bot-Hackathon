@@ -1,9 +1,12 @@
 """A dead upstream must not 500. Cached bytes come back with a stale flag."""
 
 import httpx
+import numpy as np
 from fastapi.testclient import TestClient
 
 from app.adapter import ModelAdapter
+from app.cleaning import CleanGrid, ExtentRecord
+from app.fallback_model import GridRequest
 from app.main import create_app
 from app.store import DataStore
 
@@ -133,6 +136,52 @@ def test_gap_and_bad_year_and_extent_from_cache(tmp_path):
     assert back.status_code == 200
     assert "trained" in back.json()
     assert "by_pole" in back.json()
+
+
+def test_logistic_model_ready_when_a_month_has_eight_years(tmp_path):
+    """A one-year template must not count as a fit. Eight declining years should."""
+    store = DataStore(tmp_path / "fit", client=DownClient())
+    store.refresh()
+    side = 8
+    for index, year in enumerate(range(2000, 2012)):
+        arr = np.full(side * side, 80, dtype=np.uint8)
+        arr[: 4 * (index + 1)] = 0
+        store.grids[("north", year, 9)] = (
+            CleanGrid(
+                width=side,
+                height=side,
+                values=arr.tobytes(),
+                projection="EPSG:3411",
+                epsg=3411,
+                nominal_resolution_m=25000.0,
+                pole_hole_cells=0,
+                origin_x=-3_850_000.0,
+                origin_y=5_850_000.0,
+                pixel_size_x=25000.0,
+                pixel_size_y=25000.0,
+            ),
+            False,
+        )
+        store.monthly[("north", year, 9)] = ExtentRecord(
+            year, 9, 5_000_000 - index * 100_000, None, False
+        )
+    store._recompute_observed()
+    adapter = ModelAdapter()
+    adapter.update_from_store(store)
+    assert adapter.model_ready is True
+    assert adapter.forecast_source == "model.ice_model"
+    assert adapter.model_error is None
+    cool = adapter.concentration(GridRequest("north", 2050, 9, "ssp119", None, "median"))
+    hot = adapter.concentration(GridRequest("north", 2050, 9, "ssp585", None, "median"))
+    assert cool.source == "model-forecast"
+    assert hot.source == "model-forecast"
+
+    def mean_percent(grid) -> float:
+        values = [byte for byte in grid.values_u8 if byte <= 100]
+        assert values
+        return sum(values) / len(values)
+
+    assert mean_percent(hot) < mean_percent(cool)
 
 
 def test_empty_cache_does_not_500(tmp_path):

@@ -152,6 +152,8 @@ class DataStore:
         self.grace_antarctica: list[tuple[float, float, float | None]] = []
         self.monthly_from_cache = False
         self._missing: set[tuple[str, int, int]] = set()
+        # Bumped at the end of each refresh so the model fits once per dataset.
+        self.generation = 0
 
     def refresh(self) -> None:
         own = self.client is None
@@ -193,6 +195,7 @@ class DataStore:
         self._apply_ssp(client)
         self._prefetch_grids(client)
         self._recompute_observed()
+        self.generation += 1
 
     def _download(self, client, url: str, method: str = "GET"):
         response = client.request(method, url, timeout=TIMEOUT, follow_redirects=True)
@@ -539,34 +542,29 @@ class DataStore:
         return f"{source} through {last}"
 
     def _prefetch_grids(self, client) -> None:
-        wanted = []
+        """Download every real monthly concentration grid.
+
+        IceModel fits a per-cell slope only when a month has at least 8
+        unmasked years, and the extent scale is the 2000–2010 overlap.
+        Keeping only the latest GeoTIFF makes every forecast a copy of today.
+        """
         with self.lock:
             monthly = dict(self.monthly)
-        for pole, default_month in (("north", 9), ("south", 2)):
-            latest = _latest_month(monthly, pole)
-            if latest:
-                wanted.append((pole, latest[0], latest[1]))
-            years = [y for (p, y, m), rec in monthly.items() if p == pole and m == default_month and rec.extent_km2 is not None]
-            if years:
-                wanted.append((pole, max(years), default_month))
-        # A known-good September, so /ice/north/2024/9 works even if the newest tif lags.
-        wanted.append(("north", 2024, 9))
-        # One recent north grid per calendar month so corridor fallbacks have a template.
-        for month in range(1, 13):
-            years = [
-                y
-                for (p, y, m), rec in monthly.items()
-                if p == "north" and m == month and rec.extent_km2 is not None and not rec.gap_masked
-            ]
-            if years:
-                wanted.append(("north", max(years), month))
-        seen = set()
-        unique = []
-        for item in wanted:
-            if item not in seen and not is_gap_month(item[1], item[2]):
-                seen.add(item)
-                unique.append(item)
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        seen: set[tuple[str, int, int]] = set()
+        unique: list[tuple[str, int, int]] = []
+        for (pole, year, month), rec in monthly.items():
+            if rec.gap_masked or rec.extent_km2 is None or is_gap_month(year, month):
+                continue
+            item = (pole, year, month)
+            if item in seen:
+                continue
+            seen.add(item)
+            unique.append(item)
+        # A known-good September, so /ice/north/2024/9 works even if that CSV row lagged.
+        if ("north", 2024, 9) not in seen and not is_gap_month(2024, 9):
+            unique.append(("north", 2024, 9))
+        logger.info("prefetching %s concentration grids", len(unique))
+        with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(lambda spec: self.ensure_grid(*spec, client=client), unique))
         self._update_concentration_feed()
 

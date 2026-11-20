@@ -25,6 +25,7 @@ from app.fallback_model import (
 logger = logging.getLogger("ice.adapter")
 
 try:
+    from model.ice_model import MIN_FIT_YEARS as MIN_TRAIN_YEARS
     from model.ice_model import IceModel as RealIceModel
     from model.ice_model import MassPoint as RealMassPoint
     from model.ice_model import MonthlyGrid as RealMonthlyGrid
@@ -39,6 +40,7 @@ except Exception as exc:  # model/ is built in parallel and may be absent
     RealTrainingBundle = TrainingBundle
     REAL_IMPORT = False
     IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
+    MIN_TRAIN_YEARS = 8
 
 
 class ModelAdapter:
@@ -49,6 +51,9 @@ class ModelAdapter:
         self._fallback = FallbackIceModel()
         self._real = None
         self._real_ready = False
+        self._fitting = False
+        self._fitted_generation = None
+        self._backtest_cache: tuple | None = None
         self.last_error = IMPORT_ERROR or None
 
     @property
@@ -63,10 +68,28 @@ class ModelAdapter:
     def forecast_source(self) -> str:
         if self._real_ready:
             return "model.ice_model"
-        reason = self.last_error or "model.ice_model is not importable"
+        if not self.real_import:
+            reason = self.last_error or "model.ice_model is not importable"
+        else:
+            reason = self.last_error or "model not fitted yet"
         return f"linear-trend-fallback ({reason})"
 
     def update_from_store(self, store) -> None:
+        generation = getattr(store, "generation", None)
+        with self._lock:
+            if generation is not None and generation == self._fitted_generation:
+                return
+            if self._fitting:
+                return
+            self._fitting = True
+        try:
+            self._rebuild(store)
+        finally:
+            with self._lock:
+                self._fitting = False
+                self._fitted_generation = generation
+
+    def _rebuild(self, store) -> None:
         fallback_bundle = _bundle(store, MonthlyGrid, MassPoint, TrainingBundle, placeholders=True)
         fallback = FallbackIceModel()
         fallback.update(fallback_bundle)
@@ -75,21 +98,31 @@ class ModelAdapter:
         if self.real_import and RealIceModel is not None:
             try:
                 real_bundle = _bundle(store, RealMonthlyGrid, RealMassPoint, RealTrainingBundle, placeholders=False)
-                real = RealIceModel()
-                real.update(real_bundle)
-                ready = True
+                years = _usable_year_count(real_bundle)
+                if years < MIN_TRAIN_YEARS:
+                    self.last_error = (
+                        f"IceModel not fitted: {years} concentration year(s) in the fullest month; "
+                        f"need {MIN_TRAIN_YEARS}"
+                    )
+                    logger.info(self.last_error)
+                else:
+                    logger.info("fitting IceModel on %s concentration grids", len(real_bundle.grids))
+                    real = RealIceModel()
+                    real.update(real_bundle)
+                    ready = True
+                    self.last_error = None
+                    logger.info("IceModel fit finished")
             except Exception as exc:
                 logger.exception("IceModel.update failed; keeping the linear-trend fallback")
                 self.last_error = f"update: {type(exc).__name__}: {exc}\n{traceback.format_exc()}"
                 real = None
                 ready = False
-            else:
-                self.last_error = None
         fallback.attach_georef(store.iter_grids())
         with self._lock:
             self._fallback = fallback
             self._real = real
             self._real_ready = ready
+            self._backtest_cache = None
 
     def _active(self):
         with self._lock:
@@ -129,11 +162,36 @@ class ModelAdapter:
             return self._fallback.impact(year, scenario, blend)
 
     def backtest(self) -> BacktestResult:
+        # The second fit walks every month. Keep it until the next store generation.
+        with self._lock:
+            generation = self._fitted_generation
+            cached = self._backtest_cache
+            if cached is not None and cached[0] == generation:
+                return cached[1]
         try:
-            return self._active().backtest()
+            result = self._active().backtest()
         except Exception as exc:
             self._note("backtest", exc)
-            return self._fallback.backtest()
+            result = self._fallback.backtest()
+        with self._lock:
+            if self._fitted_generation == generation:
+                self._backtest_cache = (generation, result)
+        return result
+
+
+def _usable_year_count(bundle) -> int:
+    """Largest number of distinct years in one pole-month that can train a cell."""
+    groups: dict[tuple[str, int], set[int]] = {}
+    for grid in bundle.grids:
+        if grid.gap_masked or grid.width <= 0 or grid.height <= 0:
+            continue
+        raw = grid.values_u8
+        if len(raw) != grid.width * grid.height or raw.count(255) == len(raw):
+            continue
+        groups.setdefault((grid.pole, grid.month), set()).add(grid.year)
+    if not groups:
+        return 0
+    return max(len(years) for years in groups.values())
 
 
 def _bundle(store, grid_cls, mass_cls, bundle_cls, placeholders: bool):

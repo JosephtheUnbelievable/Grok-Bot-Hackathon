@@ -509,10 +509,6 @@ def _extent_response(application, pole, month, scenario, blend, left):
     adapter: ModelAdapter = application.state.adapter
     if not store.has_monthly(pole):
         raise APIError(503, "feed_unavailable", "no sea-ice extent available", None)
-    try:
-        adapter.update_from_store(store)
-    except Exception:
-        logger.exception("extent model update failed")
     points = {point.year: point for point in adapter.extent_series(pole, month, left, blend)}
     obs_source = "nsidc-g02135-cache" if _feed_cache(store, "nsidc_monthly_extent") else "nsidc-g02135"
     series = []
@@ -578,7 +574,6 @@ def _impact_response(application, year, scenario, blend, left):
     store: DataStore = application.state.store
     adapter: ModelAdapter = application.state.adapter
     try:
-        adapter.update_from_store(store)
         result = adapter.impact(year, left, blend)
     except Exception:
         logger.exception("impact failed")
@@ -627,7 +622,6 @@ def _backtest_response(application):
     store: DataStore = application.state.store
     adapter: ModelAdapter = application.state.adapter
     try:
-        adapter.update_from_store(store)
         result = adapter.backtest()
     except Exception:
         logger.exception("backtest failed")
