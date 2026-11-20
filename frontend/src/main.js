@@ -167,7 +167,6 @@ function bindToggle(button, panel, { focus = false } = {}) {
   return { open, close };
 }
 
-const optionsUi = bindToggle($("options-btn"), $("options-pop"), { focus: true });
 const healthUi = bindToggle($("health-btn"), $("health-pop"));
 $("drawer-btn").addEventListener("click", () => setDrawer($("drawer").hidden));
 $("drawer-close").addEventListener("click", () => {
@@ -176,11 +175,6 @@ $("drawer-close").addEventListener("click", () => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  if (!$("options-pop").hidden) {
-    optionsUi.close();
-    $("options-btn").focus();
-    return;
-  }
   if (!$("health-pop").hidden) {
     healthUi.close();
     $("health-btn").focus();
@@ -192,7 +186,6 @@ document.addEventListener("keydown", (event) => {
   }
 });
 document.addEventListener("click", (event) => {
-  if (!event.target.closest(".menu")) optionsUi.close();
   if (!event.target.closest(".health-wrap")) healthUi.close();
 });
 if (location.hash === "#impacts") setDrawer(true);
@@ -287,10 +280,9 @@ function paintInstant() {
   $("year-out").textContent = String(state.year);
   $("month-out").textContent = monthName;
   $("blend-out").textContent = `blend ${blend}`;
-  const shortMonth = monthName.slice(0, 3);
-  const poleName = state.pole === "north" ? "North" : "South";
-  const bandName = state.band === "low" ? "Low" : state.band === "high" ? "High" : "Median";
-  $("options-btn").textContent = `${shortMonth} · ${poleName} · ${bandName}`;
+  document.querySelectorAll("#stops [data-stop]").forEach((stop) => {
+    stop.classList.toggle("is-selected", Math.abs(Number(state.blend) - Number(stop.dataset.stop)) < 0.051);
+  });
   fill(yearInput);
   fill(monthInput);
   fill(blendInput);
