@@ -19,7 +19,7 @@ function clone(value) {
 export function gibsUrl() {
   return {
     time: "Blue Marble",
-    url: "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=BlueMarble_ShadedRelief_Bathymetry&STYLES=&FORMAT=image/jpeg&WIDTH=1024&HEIGHT=512&CRS=EPSG:4326&BBOX=-90,-180,90,180",
+    url: "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=BlueMarble_ShadedRelief_Bathymetry&STYLES=&FORMAT=image/jpeg&WIDTH=2048&HEIGHT=1024&CRS=EPSG:4326&BBOX=-90,-180,90,180",
   };
 }
 
@@ -100,7 +100,7 @@ export function paintIce(ice) {
   soft.width = 1024;
   soft.height = 512;
   const softCtx = soft.getContext("2d");
-  softCtx.filter = "blur(10px)";
+  softCtx.filter = "blur(3px)";
   softCtx.drawImage(canvas, 0, 0);
   ctx.clearRect(0, 0, 1024, 512);
   ctx.drawImage(soft, 0, 0);

@@ -26,7 +26,7 @@ export function createGlobe(container) {
     metalness: 0,
   });
   const photoMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const earth = new THREE.Mesh(new THREE.SphereGeometry(1, 80, 56), fallbackMat);
+  const earth = new THREE.Mesh(new THREE.SphereGeometry(1, 160, 120), fallbackMat);
   scene.add(earth);
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -42,7 +42,7 @@ export function createGlobe(container) {
       depthWrite: false,
       opacity: 0,
     });
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.004, 80, 56), material);
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.003, 160, 120), material);
     mesh.renderOrder = 2;
     mesh.visible = false;
     scene.add(mesh);
@@ -55,7 +55,7 @@ export function createGlobe(container) {
   let fade = null;
 
   const atmosphere = new THREE.Mesh(
-    new THREE.SphereGeometry(1.065, 64, 48),
+    new THREE.SphereGeometry(1.028, 80, 60),
     new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -76,8 +76,8 @@ export function createGlobe(container) {
         varying vec3 vView;
         uniform vec3 color;
         void main() {
-          float rim = pow(clamp(0.55 - dot(normalize(vNormal), normalize(vView)), 0.0, 1.0), 2.4);
-          gl_FragColor = vec4(color, rim * 0.42);
+          float rim = pow(clamp(0.35 - dot(normalize(vNormal), normalize(vView)), 0.0, 1.0), 3.2);
+          gl_FragColor = vec4(color, rim * 0.55);
         }
       `,
     }),
@@ -155,7 +155,9 @@ export function createGlobe(container) {
     }
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 8;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
     tex.needsUpdate = true;
     showIce(tex);
   }
@@ -172,7 +174,9 @@ export function createGlobe(container) {
           return;
         }
         tex.colorSpace = THREE.SRGBColorSpace;
-        tex.anisotropy = 8;
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        tex.magFilter = THREE.LinearFilter;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
         showIce(tex);
       },
       undefined,
@@ -193,6 +197,9 @@ export function createGlobe(container) {
       (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = true;
         photoMat.map = tex;
         photoMat.needsUpdate = true;
         earth.material = photoMat;
@@ -279,7 +286,7 @@ export function createGlobe(container) {
   function fitRadius() {
     const vFov = (camera.fov * Math.PI) / 180;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(camera.aspect, 0.2));
-    const margin = 1.16;
+    const margin = 1.06;
     return Math.max(margin / Math.tan(vFov / 2), margin / Math.tan(hFov / 2));
   }
 
@@ -391,7 +398,7 @@ function makeGraticule() {
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   const lines = new THREE.LineSegments(
     geometry,
-    new THREE.LineBasicMaterial({ color: 0xb7c4c0, transparent: true, opacity: 0.16, depthWrite: false }),
+    new THREE.LineBasicMaterial({ color: 0xc5d0cc, transparent: true, opacity: 0.07, depthWrite: false }),
   );
   lines.renderOrder = 3;
   return lines;
