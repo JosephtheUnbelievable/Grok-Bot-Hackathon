@@ -314,10 +314,23 @@ button:focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; }
   z-index: 6;
   width: min(400px, 100vw);
   overflow: auto;
-  padding: 22px 22px 32px;
+  padding: 18px 48px 32px 22px;
   background: var(--bg);
   border-left: 1px solid var(--line);
 }
+
+.drawer-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.drawer-close:hover { color: var(--ink); }
 
 .block { margin-top: 16px; }
 
