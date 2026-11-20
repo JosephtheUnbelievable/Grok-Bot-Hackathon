@@ -60,7 +60,7 @@ Replace the ice-sheet extrapolation with [ISSM](https://issm.jpl.nasa.gov/) (Ice
 
 Each teammate’s Grok Bot took a task brief from `tasks/`, built that folder, and opened pull requests. A routine reviewed teammates’ pull requests against `API.md` on every new PR. A smoke test of the whole stack caught the zero-slope wiring bug. A Grok Bot wrote this README from the repo and those results.
 
-Session exports belong in `sessions/`. TODO: each teammate adds their export with personal information removed.
+Session exports are in `sessions/`. James's export is `sessions/james-wei-grok-bot-session.md`. Connor and Joseph add theirs as described in `sessions/README.md`.
 
 ## How to run it
 
