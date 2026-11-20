@@ -49,7 +49,7 @@ export function paintIce(ice) {
   const cx = (width - 1) / 2;
   const cy = (height - 1) / 2;
   const south = ice.pole === "south";
-  const reach = 36;
+  const reach = 20;
 
   const sample = (gx, gy) => {
     if (gx < 0 || gy < 0 || gx > width - 1 || gy > height - 1) return null;
@@ -72,28 +72,64 @@ export function paintIce(ice) {
       acc += value * wgt;
       weight += wgt;
     }
-    if (weight < 0.2) return null;
+    if (weight < 0.35) return null;
     return acc / weight;
   };
 
-  for (let y = 0; y < 512; y++) {
+  const rays = 72;
+  const edge = new Float32Array(rays);
+  const tone = new Float32Array(rays);
+  for (let i = 0; i < rays; i += 1) {
+    const theta = (i / rays) * Math.PI * 2;
+    let last = 0;
+    let sum = 0;
+    let n = 0;
+    for (let r = 0; r <= 3.2; r += 0.12) {
+      const value = sample(cx + Math.sin(theta) * r, cy - Math.cos(theta) * r);
+      if (value != null && value >= 15) {
+        last = r;
+        sum += value;
+        n += 1;
+      }
+    }
+    edge[i] = last;
+    tone[i] = n ? sum / n : 0;
+  }
+
+  const hash = (a, b) => {
+    const n = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+    return n - Math.floor(n);
+  };
+
+  for (let y = 0; y < 512; y += 1) {
     const lat = 90 - (y / 511) * 180;
     const colat = south ? 90 + lat : 90 - lat;
-    if (colat < 0 || colat > reach) continue;
-    const radius = (colat / reach) * 3.05;
-    for (let x = 0; x < 1024; x++) {
+    if (colat < 0 || colat > reach + 2) continue;
+    for (let x = 0; x < 1024; x += 1) {
       const lon = -180 + (x / 1023) * 360;
       const theta = (lon * Math.PI) / 180;
-      const value = sample(cx + Math.sin(theta) * radius, cy - Math.cos(theta) * radius);
-      if (value == null || value < 15) continue;
-      const edge = Math.min(1, (value - 15) / 4);
-      const body = Math.min(1, (value - 15) / 85);
-      const t = Math.pow(body, 0.55);
+      const wobble = (hash(Math.round(lon / 8), south ? 2 : 1) - 0.5) * 0.18
+        + Math.sin(theta * 6 + (south ? 1 : 0)) * 0.05;
+      const unit = ((theta % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      const pos = (unit / (Math.PI * 2)) * rays;
+      const i0 = Math.floor(pos) % rays;
+      const i1 = (i0 + 1) % rays;
+      const f = pos - Math.floor(pos);
+      const limit = (edge[i0] * (1 - f) + edge[i1] * f) * (1 + wobble);
+      if (limit < 0.15) continue;
+      const radius = (colat / reach) * 3.05;
+      const along = radius / limit;
+      if (along > 1) continue;
+      const mean = tone[i0] * (1 - f) + tone[i1] * f;
+      const fringe = Math.min(1, Math.max(0, (along - 0.82) / 0.18));
+      const pack = Math.min(1, Math.max(0, (mean - 15) / 70));
+      const white = Math.min(1, 0.72 + pack * 0.28 - fringe * 0.45);
+      const grain = (hash(x, y) - 0.5) * (fringe > 0.2 ? 18 : 8);
       const o = (y * 1024 + x) * 4;
-      data[o] = Math.round(93 + (255 - 93) * t);
-      data[o + 1] = Math.round(173 + (255 - 173) * t);
-      data[o + 2] = Math.round(226 + (255 - 226) * t);
-      data[o + 3] = Math.round(255 * edge);
+      data[o] = Math.min(255, Math.round(186 + (255 - 186) * white + grain));
+      data[o + 1] = Math.min(255, Math.round(214 + (255 - 214) * white + grain));
+      data[o + 2] = Math.min(255, Math.round(226 + (255 - 226) * white + grain * 0.4));
+      data[o + 3] = along > 0.94 ? Math.round(255 * (1 - along) / 0.06) : 255;
     }
   }
   ctx.putImageData(img, 0, 0);
