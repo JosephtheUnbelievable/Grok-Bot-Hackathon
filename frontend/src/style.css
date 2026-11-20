@@ -89,6 +89,29 @@ h2 { font-size: 22px; }
 
 .health-btn { display: inline-flex; align-items: center; gap: 8px; }
 .health-btn:hover, .text-btn:hover { color: var(--ink); }
+.text-btn[aria-pressed="true"] { color: var(--ink); }
+
+.ship-card {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  z-index: 4;
+  width: min(300px, 86%);
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  padding: 12px 14px 10px;
+  background: rgba(18, 20, 16, 0.94);
+  border: 1px solid var(--line);
+}
+
+.ship-card h2 { font-size: 20px; }
+.ship-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ship-head h2 { flex: 1; min-width: 0; }
+.ship-card .note { margin: 8px 0 0; color: var(--brass); font-size: 12px; }
 
 .dot {
   width: 8px;
@@ -152,7 +175,7 @@ h2 { font-size: 22px; }
 .bar {
   grid-area: bar;
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.4fr) auto auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.4fr) auto auto auto;
   gap: 22px;
   align-items: end;
   padding-top: 12px;

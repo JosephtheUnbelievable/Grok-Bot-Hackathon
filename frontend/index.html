@@ -41,8 +41,9 @@
           id="globe"
           role="img"
           tabindex="0"
-          aria-label="Globe. Drag to rotate. Both poles are reachable. Arrow keys rotate when this globe is focused."
+          aria-label="Globe. Drag to rotate. Both poles are reachable. Arrow keys rotate when this globe is focused. Click a ship for its ice risk."
         ></div>
+        <div id="ship-card" class="ship-card" hidden role="region" aria-label="Selected ship"></div>
       </div>
 
       <p class="headline">
@@ -175,6 +176,7 @@
           </div>
         </div>
 
+        <button type="button" id="ships-btn" class="text-btn" aria-pressed="true">Ships</button>
         <button
           type="button"
           id="drawer-btn"
