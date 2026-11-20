@@ -90,11 +90,6 @@ export function createGlobe(container, { apiBase = "http://127.0.0.1:8000" } = {
   const graticule = makeGraticule();
   scene.add(graticule);
 
-  const nsr = makeRoute(73, 30, 180);
-  const nwp = makeRoute(71, -140, -60);
-  scene.add(nsr);
-  scene.add(nwp);
-
   let shipLayer = null;
   let shipPickHandler = null;
   try {
@@ -213,11 +208,6 @@ export function createGlobe(container, { apiBase = "http://127.0.0.1:8000" } = {
         if (token === iceToken && iceTexture) showIce(iceTexture);
       },
     );
-  }
-
-  function setRoutes(nsrDays, nwpDays) {
-    paintRoute(nsr, nsrDays);
-    paintRoute(nwp, nwpDays);
   }
 
   function setBasemap(url, onDone) {
@@ -379,7 +369,6 @@ export function createGlobe(container, { apiBase = "http://127.0.0.1:8000" } = {
     setIceCanvas,
     setIceUrl,
     clearIce,
-    setRoutes,
     lookNorth() {
       look(-40, 89);
     },
@@ -517,33 +506,4 @@ function makeStars() {
   addStars(sky, sprite, { count: 70, size: 11, color: 0xffe2a8, opacity: 0.9 });
   addStars(sky, sprite, { count: 48, size: 8, color: 0xffb06a, opacity: 0.88 });
   return sky;
-}
-
-function makeRoute(lat, lon0, lon1) {
-  const points = [];
-  const steps = 40;
-  for (let i = 0; i <= steps; i += 1) {
-    const lon = lon0 + ((lon1 - lon0) * i) / steps;
-    points.push(latLon(lat, lon, 1.012));
-  }
-  const curve = new THREE.CatmullRomCurve3(points);
-  const mesh = new THREE.Mesh(
-    new THREE.TubeGeometry(curve, 48, 0.008, 5, false),
-    new THREE.MeshBasicMaterial({
-      color: 0xd5e6ee,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-    }),
-  );
-  mesh.renderOrder = 4;
-  mesh.visible = false;
-  return mesh;
-}
-
-function paintRoute(mesh, days) {
-  const n = Number(days);
-  const opacity = Number.isFinite(n) ? Math.max(0, Math.min(0.8, n / 180)) : 0;
-  mesh.material.opacity = opacity;
-  mesh.visible = opacity > 0.02;
 }
