@@ -35,6 +35,15 @@ from typing import Literal
 
 import numpy as np
 
+try:
+    from numba import njit, prange
+
+    _HAVE_NUMBA = True
+except Exception:  # pragma: no cover - numpy loop below is the reference
+    njit = None
+    prange = range
+    _HAVE_NUMBA = False
+
 Pole = Literal["north", "south"]
 Band = Literal["median", "low", "high"]
 ScenarioId = Literal["ssp119", "ssp126", "ssp245", "ssp370", "ssp585"]
@@ -334,6 +343,155 @@ def _irls(
     return intercept, slope, x_mean
 
 
+def _irls_draws(y, valid, x, counts, original_mean_pct):
+    """Reference bootstrap. ``counts`` is (draws, years)."""
+    draws = counts.shape[0]
+    cells = y.shape[1]
+    intercept = np.zeros((draws, cells), dtype=np.float64)
+    slope = np.zeros((draws, cells), dtype=np.float64)
+    x_mean = np.zeros((draws, cells), dtype=np.float64)
+    for draw in range(draws):
+        intercept[draw], slope[draw], x_mean[draw] = _irls(y, valid, x, counts[draw], original_mean_pct)
+    return intercept, slope, x_mean
+
+
+if _HAVE_NUMBA:
+
+    @njit(parallel=True, cache=True)
+    def _irls_draws_numba(y, valid, x, counts, original):
+        """Same fractional logit as ``_irls``, all bootstrap draws in one pass.
+
+        A cell whose valid observations are identical has slope 0, which is the
+        MLE, so those cells skip the iteration. Twelve iterations match the
+        numpy loop's ceiling; it has already converged by then.
+        """
+        n_years, n_cells = y.shape
+        n_draws = counts.shape[0]
+        intercept = np.zeros((n_draws, n_cells))
+        slope = np.zeros((n_draws, n_cells))
+        x_mean = np.zeros((n_draws, n_cells))
+        for cell in prange(n_cells):
+            n_valid = 0
+            first = 0.0
+            constant = True
+            for year in range(n_years):
+                if not valid[year, cell]:
+                    continue
+                if n_valid == 0:
+                    first = y[year, cell]
+                elif y[year, cell] != first:
+                    constant = False
+                n_valid += 1
+            if n_valid >= MIN_FIT_YEARS and constant:
+                if first < 0.001:
+                    first = 0.001
+                elif first > 0.999:
+                    first = 0.999
+                level = np.log(first / (1.0 - first))
+                for draw in range(n_draws):
+                    intercept[draw, cell] = level
+                continue
+            for draw in range(n_draws):
+                n_eff = 0.0
+                sum_wx = 0.0
+                sum_wy = 0.0
+                for year in range(n_years):
+                    if not valid[year, cell]:
+                        continue
+                    weight = counts[draw, year]
+                    n_eff += weight
+                    sum_wx += weight * x[year]
+                    sum_wy += weight * y[year, cell]
+                if n_eff < MIN_FIT_YEARS:
+                    baseline = original[cell] / 100.0
+                    if baseline < 0.001:
+                        baseline = 0.001
+                    elif baseline > 0.999:
+                        baseline = 0.999
+                    intercept[draw, cell] = np.log(baseline / (1.0 - baseline))
+                    continue
+                xm = sum_wx / n_eff
+                y_bar = sum_wy / n_eff
+                if y_bar < 0.001:
+                    y_bar = 0.001
+                elif y_bar > 0.999:
+                    y_bar = 0.999
+                a = np.log(y_bar / (1.0 - y_bar))
+                b = 0.0
+                for _iteration in range(12):
+                    sw = 1e-8
+                    sx = 0.0
+                    sx2 = 1e-8
+                    sz = 0.0
+                    sxz = 0.0
+                    for year in range(n_years):
+                        if not valid[year, cell]:
+                            continue
+                        w_obs = counts[draw, year]
+                        if w_obs == 0.0:
+                            continue
+                        xc = x[year] - xm
+                        eta = a + b * xc
+                        if eta > 30.0:
+                            eta = 30.0
+                        elif eta < -30.0:
+                            eta = -30.0
+                        if eta >= 0.0:
+                            exp_term = np.exp(-eta)
+                            probability = 1.0 / (1.0 + exp_term)
+                        else:
+                            exp_term = np.exp(eta)
+                            probability = exp_term / (1.0 + exp_term)
+                        if probability < 1e-6:
+                            probability = 1e-6
+                        elif probability > 1.0 - 1e-6:
+                            probability = 1.0 - 1e-6
+                        variance = probability * (1.0 - probability)
+                        weight = w_obs * variance
+                        working = eta + (y[year, cell] - probability) / variance
+                        sw += weight
+                        sx += weight * xc
+                        sx2 += weight * xc * xc
+                        sz += weight * working
+                        sxz += weight * xc * working
+                    det = sw * sx2 - sx * sx
+                    if det < 1e-18 and det > -1e-18:
+                        det = 1.0
+                    a = (sx2 * sz - sx * sxz) / det
+                    b = (sw * sxz - sx * sz) / det
+                if not np.isfinite(a):
+                    a = 0.0
+                elif a > 30.0:
+                    a = 30.0
+                elif a < -30.0:
+                    a = -30.0
+                if not np.isfinite(b):
+                    b = 0.0
+                intercept[draw, cell] = a
+                slope[draw, cell] = b
+                x_mean[draw, cell] = xm
+        return intercept, slope, x_mean
+
+else:  # pragma: no cover
+    _irls_draws_numba = None
+
+
+def _bootstrap_coefficients(y, valid, x, counts, original_mean_pct):
+    """40-draw IRLS. Numba is used when it imports; the numpy loop is the reference."""
+    if _irls_draws_numba is not None:
+        try:
+            return _irls_draws_numba(
+                np.ascontiguousarray(y, dtype=np.float64),
+                np.ascontiguousarray(valid, dtype=np.bool_),
+                np.ascontiguousarray(x, dtype=np.float64),
+                np.ascontiguousarray(counts, dtype=np.float64),
+                np.ascontiguousarray(original_mean_pct, dtype=np.float64),
+            )
+        except Exception:
+            pass
+    return _irls_draws(y, valid, x, counts, original_mean_pct)
+
+
 def _lstsq_quadratic(times: np.ndarray, masses: np.ndarray) -> tuple[float, float, float, float]:
     """Return ``c, r, a, t0`` for ``M = c + r (t - t0) + 0.5 a (t - t0)^2``."""
     t0 = float(np.mean(times))
@@ -440,6 +598,46 @@ class _MonthModel:
         }
         return bands, draw_raw, raw_by_band
 
+    def extents_for(self, xs: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Unscaled median-grid extent and p10/p90 bootstrap extents for each driver value.
+
+        Matches ``realize``: ``median`` is the cell-sum of the p50 grid, while
+        ``low`` / ``high`` are percentiles of the 40 per-draw cell-sums.
+        """
+        xs = np.asarray(xs, dtype=np.float64).reshape(-1)
+        n_years = int(xs.size)
+        median_raw = np.zeros(n_years, dtype=np.float64)
+        draw_raw = np.zeros((n_years, N_BOOT), dtype=np.float64)
+        if n_years == 0:
+            return median_raw, median_raw.copy(), median_raw.copy()
+        if self.fitted_idx.size:
+            area = self.area.ravel()[self.fitted_idx]
+            # A few years at a time keeps the (years, draws, cells) tensor small.
+            chunk = 4
+            for start in range(0, n_years, chunk):
+                end = min(n_years, start + chunk)
+                x_chunk = xs[start:end]
+                delta = x_chunk[:, None, None] - self.x_mean[None, :, :]
+                eta = self.intercept[None, :, :] + self.slope[None, :, :] * delta
+                rounded = np.clip(np.rint(100.0 * _sigmoid(eta)), 0.0, 100.0)
+                draw_raw[start:end] = (rounded >= EXTENT_THRESHOLD) @ area
+                median = np.percentile(rounded, 50, axis=1, method="linear")
+                median = np.clip(np.rint(median), 0.0, 100.0)
+                median_raw[start:end] = ((median >= EXTENT_THRESHOLD) * area).sum(axis=1)
+        if self.const_idx.size:
+            const = np.clip(np.rint(self.const_pct), 0.0, 100.0)
+            area = self.area.ravel()[self.const_idx]
+            extra = float(((const >= EXTENT_THRESHOLD) * area).sum())
+            draw_raw += extra
+            median_raw += extra
+        if self.fitted_idx.size or self.const_idx.size:
+            low = np.percentile(draw_raw, 10, axis=1, method="linear")
+            high = np.percentile(draw_raw, 90, axis=1, method="linear")
+        else:
+            low = np.zeros(n_years, dtype=np.float64)
+            high = np.zeros(n_years, dtype=np.float64)
+        return median_raw, low, high
+
 
 class _SheetCurve:
     def __init__(self, points: list[MassPoint]) -> None:
@@ -513,6 +711,10 @@ def _zero_score() -> PoleScore:
 
 class IceModel:
     def __init__(self) -> None:
+        # None fits every month. Backtest sets this to {9} so only September,
+        # the scored month, materializes coefficients. Earlier months still
+        # consume the bootstrap stream so September's draws stay put.
+        self._materialize_months: set[int] | None = None
         self._clear()
 
     def _clear(self) -> None:
@@ -532,6 +734,10 @@ class IceModel:
         self._lon: np.ndarray | None = None
         self._greenland: _SheetCurve | None = None
         self._antarctica: _SheetCurve | None = None
+        self._extent_cache: dict = {}
+        self._impact_cache: dict = {}
+        self._conc_cache: dict = {}
+        self._backtest_cache: BacktestResult | None = None
 
     def update(self, bundle: TrainingBundle) -> None:
         """Fit per-cell, per-month logistic curves and the ice-sheet quadratic.
@@ -596,7 +802,10 @@ class IceModel:
                 if not members:
                     continue
                 _shape, usable = _dominant_shape(members)
-                self._models[(pole, month)] = self._fit_month(pole, month, usable, rng)
+                materialize = self._materialize_months is None or month in self._materialize_months
+                fitted = self._fit_month(pole, month, usable, rng, materialize=materialize)
+                if fitted is not None:
+                    self._models[(pole, month)] = fitted
 
     def _fit_month(
         self,
@@ -604,7 +813,8 @@ class IceModel:
         month: int,
         grids: list[MonthlyGrid],
         rng: np.random.Generator,
-    ) -> _MonthModel:
+        materialize: bool = True,
+    ) -> _MonthModel | None:
         height, width = grids[0].height, grids[0].width
         stack = np.stack([_grid_array(grid) for grid in grids])
         valid = stack <= 100
@@ -631,10 +841,16 @@ class IceModel:
             y_fit = fraction[:, fitted_mask]
             v_fit = valid[:, fitted_mask]
             original = mean_percent[fitted_mask]
+            # Drawn even when this month is not materialized, so a later month
+            # sees the same Generator(0) stream as a full fit.
             draws = rng.integers(0, len(years), size=(N_BOOT, len(years)))
-            for draw in range(N_BOOT):
-                counts = np.bincount(draws[draw], minlength=len(years)).astype(np.float64)
-                intercept[draw], slope[draw], x_mean[draw] = _irls(y_fit, v_fit, x, counts, original)
+            if materialize:
+                counts = np.vstack(
+                    [np.bincount(draws[draw], minlength=len(years)).astype(np.float64) for draw in range(N_BOOT)]
+                )
+                intercept, slope, x_mean = _bootstrap_coefficients(y_fit, v_fit, x, counts, original)
+        if not materialize:
+            return None
         latest = grids[-1]
         model = _MonthModel(
             height=height,
@@ -663,17 +879,16 @@ class IceModel:
     def _extent_scale(self, grids: list[MonthlyGrid], model: _MonthModel) -> float:
         by_year = {grid.year: grid for grid in grids}
         observed: list[float] = []
-        modeled: list[float] = []
+        xs: list[float] = []
         for year in range(SCALE_YEAR_MIN, SCALE_YEAR_MAX + 1):
             grid = by_year.get(year)
             if grid is None or grid.extent_km2 is None:
                 continue
-            x = self._x_at(year, "ssp245", None, training=True)
-            _bands, _draws, raw_by_band = model.realize(x)
-            modeled.append(raw_by_band["median"])
+            xs.append(self._x_at(year, "ssp245", None, training=True))
             observed.append(float(grid.extent_km2))
         if not observed:
             return 1.0
+        modeled, _low, _high = model.extents_for(np.asarray(xs, dtype=np.float64))
         mean_modeled = float(np.mean(modeled))
         if mean_modeled <= 0.0:
             return 1.0
@@ -735,6 +950,16 @@ class IceModel:
         return max(current / reference, 0.0)
 
     def concentration(self, req: GridRequest) -> ConcentrationGrid:
+        blend_key = None if req.blend is None else round(float(req.blend), 6)
+        key = (req.pole, req.year, req.month, req.scenario, blend_key, req.band)
+        cached = self._conc_cache.get(key)
+        if cached is not None:
+            return cached
+        result = self._concentration(req)
+        self._conc_cache[key] = result
+        return result
+
+    def _concentration(self, req: GridRequest) -> ConcentrationGrid:
         """Observed year-month: return the satellite bytes for every band.
 
         Later year-month: logistic prediction at the blended regressor.
@@ -836,64 +1061,83 @@ class IceModel:
         blend: float | None,
     ) -> list[ExtentPoint]:
         """1979..2100 inclusive for that pole and calendar month."""
+        blend_key = None if blend is None else round(float(blend), 6)
+        key = (pole, month, scenario, blend_key)
+        cached = self._extent_cache.get(key)
+        if cached is not None:
+            return cached
+        points = self._extent_series(pole, month, scenario, blend)
+        self._extent_cache[key] = points
+        return points
+
+    def _extent_series(
+        self,
+        pole: Pole,
+        month: int,
+        scenario: ScenarioId,
+        blend: float | None,
+    ) -> list[ExtentPoint]:
         month_model = self._models.get((pole, month))
-        points: list[ExtentPoint] = []
+        points: list[ExtentPoint | None] = [None] * (YEAR_MAX - YEAR_MIN + 1)
+        forecast_years: list[int] = []
+        forecast_x: list[float] = []
         for year in range(YEAR_MIN, YEAR_MAX + 1):
             grid = self._grids.get((pole, year, month))
+            slot = year - YEAR_MIN
             if grid is not None and grid.gap_masked:
-                points.append(
-                    ExtentPoint(year, None, None, None, False, True, SOURCE_NSIDC, METHOD_CSV)
-                )
+                points[slot] = ExtentPoint(year, None, None, None, False, True, SOURCE_NSIDC, METHOD_CSV)
                 continue
             if grid is not None:
-                points.append(
-                    ExtentPoint(
-                        year,
-                        grid.extent_km2,
-                        None,
-                        None,
-                        False,
-                        False,
-                        SOURCE_NSIDC,
-                        METHOD_CSV,
-                    )
+                points[slot] = ExtentPoint(
+                    year,
+                    grid.extent_km2,
+                    None,
+                    None,
+                    False,
+                    False,
+                    SOURCE_NSIDC,
+                    METHOD_CSV,
                 )
                 continue
             if self._observed_through is None:
-                points.append(
-                    ExtentPoint(year, None, None, None, False, False, SOURCE_NOT_READY, METHOD_MODEL)
-                )
+                points[slot] = ExtentPoint(year, None, None, None, False, False, SOURCE_NOT_READY, METHOD_MODEL)
                 continue
             if (year, month) <= self._observed_through:
-                points.append(
-                    ExtentPoint(year, None, None, None, False, False, SOURCE_NSIDC, METHOD_CSV)
-                )
+                points[slot] = ExtentPoint(year, None, None, None, False, False, SOURCE_NSIDC, METHOD_CSV)
                 continue
             if month_model is None:
-                points.append(
-                    ExtentPoint(year, None, None, None, True, False, SOURCE_FORECAST, METHOD_MODEL)
-                )
+                points[slot] = ExtentPoint(year, None, None, None, True, False, SOURCE_FORECAST, METHOD_MODEL)
                 continue
-            x = self._x_at(year, scenario, blend, training=False)
-            _bands, draw_raw, raw_by_band = month_model.realize(x)
+            forecast_years.append(year)
+            forecast_x.append(self._x_at(year, scenario, blend, training=False))
+        if forecast_years and month_model is not None:
+            median, low, high = month_model.extents_for(np.asarray(forecast_x, dtype=np.float64))
             scale = month_model.extent_scale
-            low, high = np.percentile(draw_raw, [10, 90], method="linear")
-            points.append(
-                ExtentPoint(
+            for index, year in enumerate(forecast_years):
+                points[year - YEAR_MIN] = ExtentPoint(
                     year,
-                    raw_by_band["median"] * scale,
-                    float(low) * scale,
-                    float(high) * scale,
+                    float(median[index]) * scale,
+                    float(low[index]) * scale,
+                    float(high[index]) * scale,
                     True,
                     False,
                     SOURCE_FORECAST,
                     METHOD_MODEL,
                 )
-            )
-        return points
+        return [point for point in points if point is not None]
 
     def impact(self, year: int, scenario: ScenarioId, blend: float | None) -> ImpactResult:
         """Median ice. Sea-level low/high from the mass residual bootstrap."""
+        blend_key = None if blend is None else round(float(blend), 6)
+        key = (int(year), scenario, blend_key)
+        cached = self._impact_cache.get(key)
+        if cached is not None:
+            return cached
+        result = self._impact(year, scenario, blend)
+        self._impact_cache[key] = result
+        return result
+
+    def _impact(self, year: int, scenario: ScenarioId, blend: float | None) -> ImpactResult:
         northern, northwest = self._shipping(year, scenario, blend)
         greenland_mm, antarctica_mm, low_mm, high_mm, source = self._sea_level(year, scenario, blend)
         return ImpactResult(
@@ -1079,6 +1323,13 @@ class IceModel:
 
     def backtest(self) -> BacktestResult:
         """Second fit on year <= 2010. Does not replace the model update() stored."""
+        if self._backtest_cache is not None:
+            return self._backtest_cache
+        result = self._backtest()
+        self._backtest_cache = result
+        return result
+
+    def _backtest(self) -> BacktestResult:
         eval_end = self._eval_end_year()
         trainable = any((not grid.gap_masked) and grid.year <= TRAIN_END_YEAR for grid in self._all_grids)
         if not trainable:
@@ -1091,6 +1342,9 @@ class IceModel:
                 _zero_score(),
             )
         held = IceModel()
+        # September is the only scored month. Other months still advance
+        # Generator(0) inside update(), they just skip the coefficient solve.
+        held._materialize_months = {9}
         held.update(
             TrainingBundle(
                 grids=[grid for grid in self._all_grids if grid.year <= TRAIN_END_YEAR],
