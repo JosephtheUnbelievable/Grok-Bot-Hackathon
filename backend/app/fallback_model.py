@@ -413,23 +413,37 @@ class FallbackIceModel:
         note = "" if len(nsr_frac) >= 10 else f" Partial: {len(nsr_frac)} of 12 months."
         nsr = ShippingSeason(max(0, nsr_days), nsr_open, nsr_count, METHOD + note)
         nwp = ShippingSeason(max(0, nwp_days), nwp_open, nwp_count, METHOD + note)
-        feb = self._grid_for_month(year, 2, scenario, blend, forecast)
+        monthly = {name: {} for name in COMMUNITIES}
+        for month in range(1, 13):
+            got = self._grid_for_month(year, month, scenario, blend, forecast)
+            if got is None:
+                continue
+            grid, values = got
+            for name, (lat, lon) in COMMUNITIES.items():
+                conc = sample_ocean(grid, values, lat, lon)
+                if conc is not None:
+                    monthly[name][month] = float(conc)
         places = {}
-        if feb is None:
-            return nsr, nwp, None, None, WINTER_METHOD + " No February grid is loaded."
-        grid, values = feb
         lost = 0
         usable = 0
-        for name, (lat, lon) in COMMUNITIES.items():
-            conc = sample_ocean(grid, values, lat, lon)
-            if conc is None:
+        for name in COMMUNITIES:
+            means = monthly[name]
+            if not means:
                 places[name] = None
                 continue
-            conc_i = int(max(0, min(100, round(conc))))
-            below = conc_i < 15
-            usable += 1
-            lost += int(below)
-            places[name] = {"february_percent": conc_i, "below_15": below}
+            february = means.get(2)
+            february_percent = None if february is None else int(max(0, min(100, round(february))))
+            below = None if february_percent is None else february_percent < 15
+            if below is not None:
+                usable += 1
+                lost += int(below)
+            places[name] = {
+                "february_percent": february_percent,
+                "below_15": below,
+                "open_water_days": _open_water_days(year, means),
+            }
+        if usable == 0 and not any(monthly.values()):
+            return nsr, nwp, None, None, WINTER_METHOD + " No February grid is loaded."
         winter = None if usable == 0 else lost / usable
         return nsr, nwp, winter, places, WINTER_METHOD
 
@@ -443,6 +457,18 @@ class FallbackIceModel:
             if self.obs[1] < 9:
                 end = self.obs[0] - 1
         return BacktestResult(trained, 2010, 2011, max(end, 2011) if trained else end, north, south)
+
+
+def _open_water_days(year: int, means: dict) -> int | None:
+    """Same daily interpolation the forecast model uses, when that package imports."""
+    try:
+        from model.ice_model import _open_season_from_means
+    except Exception:
+        return None
+    days, _opening, _count = _open_season_from_means(
+        int(year), {int(month): float(value) for month, value in means.items()}
+    )
+    return int(days)
 
 
 def _adjust(values: bytes, width: int, height: int, target_km2: float) -> tuple[bytes, float, float]:

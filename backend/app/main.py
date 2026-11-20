@@ -31,15 +31,19 @@ ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
 
 NSR_DEFINITION = (
-    "Proxy, not a route solver. A month is open when the mean concentration of unmasked "
-    "cells in lat 66–80 N, lon 30–180 E is below 15%. Days = 30 per open month, 28 in February. "
-    "opening_date is the first day of the first open month on or after June, else null when no "
-    "month from June onward is open."
+    "Proxy, not a route solver. Monthly mean concentration of unmasked cells in lat 66–80 N, "
+    "lon 30–180 E is anchored at mid-month and linearly interpolated to each day, December "
+    "joined to January of the same year. A day is open when that concentration is below 15%. "
+    "open_season_days counts those days (February 29 included in leap years). opening_date is "
+    "the first open day on or after 1 June, else null when no later day is open. "
+    "Method: daily linear interpolation of the monthly mean."
 )
 NWP_DEFINITION = "Same proxy for lat 68–75 N, lon 140 W–60 W."
 ICE_FREE_DEFINITION = (
     "First year in 1979–2100 whose September northern extent_km2 is below 1000000 under this "
-    "scenario's median band. null if none."
+    "scenario's median band. null if none. When it is null, ice_free_september_label is "
+    "'not before 2100' and minimum_september_extent_km2 is the lowest September median in "
+    "1979–2100 (minimum_september_extent_year is that year). The year is not guessed."
 )
 WINTER_DEFINITION = (
     "Share of unmasked cells at lat >= 60 N whose 1981–2010 February mean was >= 15% and whose "
@@ -48,7 +52,10 @@ WINTER_DEFINITION = (
 )
 SEA_LEVEL_BASELINE = (
     "Mass anomaly relative to the first GRACE sample, converted as mm = -mass_gt / 362. "
-    "total_mm = greenland_mm + antarctica_mm. low_mm and high_mm are totals."
+    "After the last sample the sheet keeps losing mass at the average GRACE rate "
+    "(last minus first, per year), multiplied year by year by warming(year) / warming(last). "
+    "A fitted acceleration is not extrapolated. total_mm = greenland_mm + antarctica_mm. "
+    "low_mm and high_mm are totals and bracket total_mm."
 )
 BAND_NOTE = "low is p10 and high is p90 of bootstrap extent; null on observed years"
 BACKTEST_METRIC = "rmse of scaled modeled September extent against the NSIDC monthly CSV"
@@ -586,6 +593,25 @@ def _impact_response(application, year, scenario, blend, left):
     obs = store.observed_through
     forecast = obs is None or year > obs[0]
     stale = _feed_stale(store, "grace_icesheet") or _feed_stale(store, "ssp_pathways") or not adapter.model_ready
+    ice_year = result.ice_free_september_year
+    minimum_km2, minimum_year = _minimum_september(adapter, left, blend)
+    if ice_year is None:
+        ice_label = "not before 2100"
+    else:
+        ice_label = str(int(ice_year))
+    places = getattr(result, "community_places", None)
+    if places is None:
+        places = getattr(result, "community_february", None)
+    places_method = getattr(result, "places_method", "") or ""
+    if places is None and not places_method:
+        places_method = (
+            "Per-town ice needs the NSIDC 25 km north grid (304 by 448). This fit does not have it."
+        )
+    greenland_mm = _round_mm(result.greenland_mm)
+    antarctica_mm = _round_mm(result.antarctica_mm)
+    total_mm = _round_mm(result.total_mm)
+    low_mm = min(_round_mm(result.low_mm), total_mm)
+    high_mm = max(_round_mm(result.high_mm), total_mm)
     return {
         "year": year,
         "scenario": scenario,
@@ -601,26 +627,54 @@ def _impact_response(application, year, scenario, blend, left):
             "northwest_passage": _season_json(result.northwest_passage, NWP_DEFINITION),
         },
         "communities": {
-            "ice_free_september_year": result.ice_free_september_year,
+            "ice_free_september_year": None if ice_year is None else int(ice_year),
+            "ice_free_september_label": ice_label,
+            "minimum_september_extent_km2": minimum_km2,
+            "minimum_september_extent_year": minimum_year,
             "winter_ice_loss_index": result.winter_ice_loss_index,
             "winter_method": getattr(result, "winter_method", "") or "",
-            "places": getattr(result, "community_february", None),
+            "places": places,
+            "places_method": places_method,
             "definitions": {
                 "ice_free_september_year": ICE_FREE_DEFINITION,
                 "winter_ice_loss_index": WINTER_DEFINITION,
+                "places": places_method,
             },
         },
         "sea_level": {
-            "greenland_mm": _round_mm(result.greenland_mm),
-            "antarctica_mm": _round_mm(result.antarctica_mm),
-            "total_mm": _round_mm(result.total_mm),
-            "low_mm": _round_mm(result.low_mm),
-            "high_mm": _round_mm(result.high_mm),
+            "greenland_mm": greenland_mm,
+            "antarctica_mm": antarctica_mm,
+            "total_mm": total_mm,
+            "low_mm": low_mm,
+            "high_mm": high_mm,
             "conversion_gt_per_mm": 362,
             "baseline": SEA_LEVEL_BASELINE,
             "source": result.sea_level_source,
         },
     }
+
+
+def _minimum_september(adapter, scenario, blend) -> tuple[int | None, int | None]:
+    """Lowest September northern median in 1979–2100, and the year it happens."""
+    try:
+        series = adapter.extent_series("north", 9, scenario, blend)
+    except Exception:
+        logger.exception("september minimum failed")
+        return None, None
+    best_km2 = None
+    best_year = None
+    for point in series:
+        extent = getattr(point, "extent_km2", None)
+        if extent is None:
+            continue
+        extent = float(extent)
+        year = int(point.year)
+        if best_km2 is None or extent < best_km2 or (extent == best_km2 and year < best_year):
+            best_km2 = extent
+            best_year = year
+    if best_km2 is None:
+        return None, None
+    return int(round(best_km2)), best_year
 
 
 def _backtest_response(application):

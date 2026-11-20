@@ -235,6 +235,8 @@ def test_mass_loss_converts_to_positive_sea_level() -> None:
     assert at_loss.winter_ice_loss_index is None
     assert at_loss.northern_sea_route.open_season_days == 0
     assert at_loss.northern_sea_route.opening_date is None
+    assert at_loss.community_places is None
+    assert "304" in at_loss.places_method
 
 
 def test_empty_update_does_not_raise_and_reports_not_ready() -> None:
@@ -469,7 +471,168 @@ def test_shipping_season_counts_open_months_and_uses_28_day_february() -> None:
     impact = model.impact(2016, "ssp245", None)
     assert impact.is_forecast is False
     assert impact.northern_sea_route.open_month_count == 12
-    assert impact.northern_sea_route.open_season_days == 11 * 30 + 28
+    # 2016 is a leap year and every NSR day is open, so the count is 366, not 12*30.
+    assert impact.northern_sea_route.open_season_days == 366
     assert impact.northern_sea_route.opening_date == "2016-06-01"
-    assert impact.northwest_passage == ShippingSeason(0, None, 0)
+    assert "daily-linear-interpolation" in impact.northern_sea_route.method
+    assert impact.northwest_passage.open_season_days == 0
+    assert impact.northwest_passage.opening_date is None
+    assert impact.northwest_passage.open_month_count == 0
     assert impact.winter_ice_loss_index is None
+
+
+def _ordered_warming() -> dict[str, dict[int, float]]:
+    """Shared history through 2025, then SSP anchors. SSP1-1.9 eases down to 1.4."""
+    anchors = {
+        "ssp119": 1.4,
+        "ssp126": 1.8,
+        "ssp245": 2.7,
+        "ssp370": 3.6,
+        "ssp585": 4.4,
+    }
+    table: dict[str, dict[int, float]] = {}
+    for scenario, end in anchors.items():
+        series = {}
+        for year in range(1979, 2101):
+            if year <= 2025:
+                series[year] = 1.5
+            elif year >= 2090:
+                series[year] = end
+            else:
+                span = 2090 - 2025
+                series[year] = 1.5 + (year - 2025) / span * (end - 1.5)
+        table[scenario] = series
+    return table
+
+
+def _grace_points(mass_at) -> list[MassPoint]:
+    points = []
+    for year in np.arange(2002.0, 2025.0, 0.5):
+        seasonal = 120.0 * math.sin(2.0 * math.pi * float(year))
+        points.append(MassPoint(float(year), float(mass_at(float(year)) + seasonal), 40.0))
+    return points
+
+
+def _assert_sea_level_shape(model: IceModel) -> dict[str, list[float]]:
+    order = ("ssp119", "ssp126", "ssp245", "ssp370", "ssp585")
+    milestones = (2030, 2050, 2080, 2100)
+    probe = sorted(set(milestones) | set(range(2026, 2101, 5)))
+    by_scenario: dict[str, list[float]] = {}
+    for scenario in order:
+        previous = None
+        recorded: list[float] = []
+        for year in probe:
+            impact = model.impact(year, scenario, None)  # type: ignore[arg-type]
+            assert impact.low_mm <= impact.total_mm + 1e-9
+            assert impact.total_mm <= impact.high_mm + 1e-9
+            assert impact.total_mm == pytest.approx(impact.greenland_mm + impact.antarctica_mm)
+            assert impact.total_mm >= -1e-6
+            if previous is not None:
+                assert impact.total_mm + 1e-6 >= previous
+            previous = impact.total_mm
+            if year in milestones:
+                recorded.append(impact.total_mm)
+        assert recorded[0] < recorded[-1]
+        by_scenario[scenario] = recorded
+    for index in range(len(milestones)):
+        column = [by_scenario[scenario][index] for scenario in order]
+        assert column == sorted(column)
+    return by_scenario
+
+
+def test_accelerating_grace_loss_rises_with_time_and_warming() -> None:
+    def greenland(year: float) -> float:
+        dt = year - 2002.0
+        return -180.0 * dt + 0.5 * (-8.0) * dt * dt
+
+    def antarctica(year: float) -> float:
+        dt = year - 2002.0
+        return -90.0 * dt + 0.5 * (-3.0) * dt * dt
+
+    model = _fit(
+        _bundle(
+            [],
+            warming=_ordered_warming(),
+            greenland=_grace_points(greenland),
+            antarctica=_grace_points(antarctica),
+        )
+    )
+    assert model._greenland is not None and model._greenland.acceleration < 0
+    assert model._antarctica is not None and model._antarctica.acceleration < 0
+    by_scenario = _assert_sea_level_shape(model)
+    assert model.impact(2100, "ssp585", None).sea_level_source == "grace-gracefo"
+    assert 40 < by_scenario["ssp126"][-1] < 250
+    assert by_scenario["ssp126"][-1] < by_scenario["ssp585"][-1] < 450
+
+
+def test_decelerating_grace_loss_does_not_bend_sea_level_back() -> None:
+    """A positive quadratic acceleration used to reverse sea level, hotter scenarios first."""
+
+    def sheet(scale: float):
+        def mass_at(year: float) -> float:
+            return scale * -5200.0 * (1.0 - math.exp(-(year - 2002.0) / 6.0))
+
+        return mass_at
+
+    model = _fit(
+        _bundle(
+            [],
+            warming=_ordered_warming(),
+            greenland=_grace_points(sheet(1.0)),
+            antarctica=_grace_points(sheet(0.45)),
+        )
+    )
+    assert model._greenland is not None and model._greenland.acceleration > 0
+    by_scenario = _assert_sea_level_shape(model)
+    assert model.impact(2050, "ssp126", None).sea_level_source == "grace-gracefo"
+    assert 30 < by_scenario["ssp126"][-1] < 300
+    assert by_scenario["ssp585"][1] >= by_scenario["ssp126"][1]
+    assert by_scenario["ssp585"][2] > 0
+    assert by_scenario["ssp585"][-1] > by_scenario["ssp126"][-1]
+
+
+def test_nasa_fallback_is_ordered_monotonic_and_in_ar6_range() -> None:
+    model = _fit(_bundle([], warming=_ordered_warming()))
+    sample = model.impact(2050, "ssp126", None)
+    assert sample.sea_level_source == "nasa-science-summary-fallback"
+    assert sample.low_mm == pytest.approx(sample.total_mm)
+    assert sample.high_mm == pytest.approx(sample.total_mm)
+    by_scenario = _assert_sea_level_shape(model)
+    assert 50 < by_scenario["ssp126"][-1] < 220
+    assert 150 < by_scenario["ssp585"][-1] < 400
+    assert by_scenario["ssp585"][-1] > by_scenario["ssp126"][-1]
+
+
+def test_towns_and_shipping_days_follow_the_monthly_curve() -> None:
+    values = {1: 90, 2: 90, 3: 80, 4: 60, 5: 40, 6: 20, 7: 0, 8: 0, 9: 5, 10: 25, 11: 60, 12: 90}
+    grids = []
+    for month, value in values.items():
+        raw = np.full((NORTH_HEIGHT, NORTH_WIDTH), value, dtype=np.uint8).tobytes()
+        grids.append(
+            _grid(
+                "north",
+                2016,
+                month,
+                raw,
+                width=NORTH_WIDTH,
+                height=NORTH_HEIGHT,
+                extent=4_000_000.0,
+            )
+        )
+    model = _fit(_bundle(grids, co2={2016: 1500.0}))
+    impact = model.impact(2016, "ssp245", None)
+    days = impact.northern_sea_route.open_season_days
+    assert days % 30 != 0
+    assert 60 < days < 200
+    assert impact.northern_sea_route.opening_date is not None
+    assert impact.northern_sea_route.opening_date.startswith("2016-06-")
+    assert "daily-linear-interpolation" in impact.northern_sea_route.method
+    places = impact.community_places
+    assert places is not None
+    for name in ("Utqiagvik", "Kivalina", "Shishmaref", "Tuktoyaktuk"):
+        place = places[name]
+        assert place is not None
+        assert place["february_percent"] == 90
+        assert place["below_15"] is False
+        assert place["open_water_days"] == days
+    assert "100 km" in impact.places_method

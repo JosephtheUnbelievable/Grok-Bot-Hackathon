@@ -286,24 +286,37 @@ Query: `year` (required), `scenario` (default `ssp245`), `blend` (optional).
   "observed_through": { "year": 2026, "month": 10 },
   "shipping": {
     "northern_sea_route": {
-      "open_season_days": 120,
-      "opening_date": "2050-07-01",
+      "open_season_days": 109,
+      "opening_date": "2050-07-04",
       "open_month_count": 4,
-      "definition": "Proxy, not a route solver. A month is open when the mean concentration of unmasked cells in lat 66–80 N, lon 30–180 E is below 15%. Days = 30 per open month, 28 in February. opening_date is the first day of the first open month on or after June, else null when no month from June onward is open."
+      "method": "daily-linear-interpolation: monthly mean concentration is anchored at mid-month and linearly interpolated to each day, December joined to January of the same year. A day is open when that value is below 15%. February 29 is included in leap years.",
+      "definition": "Proxy, not a route solver. Monthly mean concentration of unmasked cells in lat 66–80 N, lon 30–180 E is anchored at mid-month and linearly interpolated to each day, December joined to January of the same year. A day is open when that concentration is below 15%. open_season_days counts those days (February 29 included in leap years). opening_date is the first open day on or after 1 June, else null when no later day is open. Method: daily linear interpolation of the monthly mean."
     },
     "northwest_passage": {
-      "open_season_days": 60,
-      "opening_date": "2050-08-01",
-      "open_month_count": 2,
+      "open_season_days": 74,
+      "opening_date": "2050-08-11",
+      "open_month_count": 3,
+      "method": "daily-linear-interpolation: monthly mean concentration is anchored at mid-month and linearly interpolated to each day, December joined to January of the same year. A day is open when that value is below 15%. February 29 is included in leap years.",
       "definition": "Same proxy for lat 68–75 N, lon 140 W–60 W."
     }
   },
   "communities": {
-    "ice_free_september_year": 2052,
+    "ice_free_september_year": null,
+    "ice_free_september_label": "not before 2100",
+    "minimum_september_extent_km2": 3400000,
+    "minimum_september_extent_year": 2012,
     "winter_ice_loss_index": 0.42,
+    "places": {
+      "Utqiagvik": { "february_percent": 96, "below_15": false, "open_water_days": 48 },
+      "Kivalina": { "february_percent": 94, "below_15": false, "open_water_days": 55 },
+      "Shishmaref": { "february_percent": 91, "below_15": false, "open_water_days": 62 },
+      "Tuktoyaktuk": { "february_percent": 97, "below_15": false, "open_water_days": 41 }
+    },
+    "places_method": "Mean of unmasked 25 km cells within 100 km of the town on the median ice grid. february_percent is February. open_water_days uses the same daily interpolation as the shipping proxy (a day is open below 15%).",
     "definitions": {
-      "ice_free_september_year": "First year in 1979–2100 whose September northern extent_km2 is below 1000000 under this scenario's median band. null if none.",
-      "winter_ice_loss_index": "Share of unmasked cells at lat >= 60 N whose 1981–2010 February mean was >= 15% and whose February concentration in the selected year is < 15%. Range 0–1. null if that climatology cannot be built."
+      "ice_free_september_year": "First year in 1979–2100 whose September northern extent_km2 is below 1000000 under this scenario's median band. null if none. When it is null, ice_free_september_label is 'not before 2100' and minimum_september_extent_km2 is the lowest September median in 1979–2100 (minimum_september_extent_year is that year). The year is not guessed.",
+      "winter_ice_loss_index": "Share of unmasked cells at lat >= 60 N whose 1981–2010 February mean was >= 15% and whose February concentration in the selected year is < 15%. Range 0–1. null if that climatology cannot be built.",
+      "places": "Mean of unmasked 25 km cells within 100 km of Utqiagvik, Kivalina, Shishmaref, and Tuktoyaktuk. null when the north grid is not the NSIDC 304 by 448 grid."
     }
   },
   "sea_level": {
@@ -313,15 +326,17 @@ Query: `year` (required), `scenario` (default `ssp245`), `blend` (optional).
     "low_mm": 90.0,
     "high_mm": 160.0,
     "conversion_gt_per_mm": 362,
-    "baseline": "Mass anomaly relative to the first GRACE sample, converted as mm = -mass_gt / 362. total_mm = greenland_mm + antarctica_mm. low_mm and high_mm are totals.",
+    "baseline": "Mass anomaly relative to the first GRACE sample, converted as mm = -mass_gt / 362. After the last sample the sheet keeps losing mass at the average GRACE rate (last minus first, per year), multiplied year by year by warming(year) / warming(last). A fitted acceleration is not extrapolated. total_mm = greenland_mm + antarctica_mm. low_mm and high_mm are totals and bracket total_mm.",
     "source": "grace-gracefo"
   }
 }
 ```
 
-`sea_level.source` is `grace-gracefo` or `nasa-science-summary-fallback`. Fallback rates: Greenland **−264 Gt/yr**, Antarctica **−135 Gt/yr**, applied from 2002, then for years after the last real sample multiplied by `warming(year) / warming(last real year)` when a warming pathway exists. Acceleration scaling for a real GRACE fit is specified in the model interface below.
+`sea_level.source` is `grace-gracefo` or `nasa-science-summary-fallback`. Fallback rates: Greenland **−264 Gt/yr**, Antarctica **−135 Gt/yr**, applied from 2002, then for years after 2025 the remaining rate is multiplied by `warming(year) / warming(2025)` when a warming pathway exists. A real GRACE fit does not extrapolate the quadratic acceleration (that term bends mascon series back into a sea-level fall). After the last sample the sheet continues at its mission-mean loss rate, multiplied year by year by `warming(year) / warming(last sample year)`. `low_mm <= total_mm <= high_mm`.
 
-`opening_date` is `YYYY-MM-DD` or `null`. `open_season_days` is an integer, 0 when the season does not open. The definitions must be copied into the response so the panel can show them.
+`opening_date` is `YYYY-MM-DD` or `null`. `open_season_days` is an integer, 0 when the season does not open. It is a count of days, not a multiple of 30. The definitions must be copied into the response so the panel can show them.
+
+`communities.places` is an object keyed by Utqiagvik, Kivalina, Shishmaref, and Tuktoyaktuk, or `null` when the north grid is not the NSIDC 304×448 grid. Each town has `february_percent`, `below_15`, and `open_water_days`. `ice_free_september_year` stays `null` when September extent never drops below 1,000,000 km². In that case `ice_free_september_label` is `not before 2100` and the minimum-extent fields say how low September got. The year is not invented.
 
 Shipping and the winter index for a year after `observed_through` use the median forecast grids (or `band` is not a parameter here; impact always uses the median ice, while sea-level `low_mm` / `high_mm` still span the mass uncertainty).
 
@@ -528,22 +543,23 @@ Extent for a forecast: cell area defaults to 625 km² when `cell_area_km2` is No
 
 ### Ice sheets
 
-On real GRACE points, fit `M(t) = c + r (t - t0) + 0.5 a (t - t0)^2` in Gt, `t0` = mean decimal year of the samples.
+On real GRACE points, fit `M(t) = c + r (t - t0) + 0.5 a (t - t0)^2` in Gt, `t0` = mean decimal year of the samples. The fit is kept so its acceleration can be inspected. It is not the forward projection: on mascon series `a` is often positive, the parabola turns up, and multiplying only that term by warming made hotter scenarios produce less sea level.
 
-For a year `Y` after the last sample, with `W` the blended warming:
-
-```
-scale = max(W(Y) / W(Y_last), 0)
-M(Y) = c + r (Y - t0) + 0.5 * a * (Y - t0)^2 * scale
-```
-
-For a year inside the GRACE record, use the observed anomaly (nearest sample) and do not apply `scale`. Contribution in millimetres:
+For a year inside the GRACE record, use the observed anomaly (nearest sample). Contribution in millimetres:
 
 ```
 mm = -(M(Y) - M_first) / 362
 ```
 
-If `M` is already relative to the first sample, `M_first` is about 0; still subtract the first sample so the baseline is explicit. `low_mm` and `high_mm` come from refitting on residual-resampled series (same 40 / seed 0 / p10 / p90) and summing both ice sheets.
+For a year `Y` after the last sample, with `W` the blended warming and `R` the mission-mean rate `(M_last - M_first) / (t_last - t_first)`:
+
+```
+R_loss = min(R, 0)
+scale(t) = max(W(t) / W(t_last), 0)   for t after the last sample, else 1
+M(Y) = M_last + R_loss * integral_last^Y scale(t) dt
+```
+
+Mass therefore does not increase after the record, sea level does not fall, and a pathway that is at least as warm in every future year contributes at least as much. `low_mm` and `high_mm` come from the same projection on residual-resampled series (40 draws, seed 0, p10 / p90) summed across both ice sheets, then widened so `low_mm <= total_mm <= high_mm`.
 
 With no GRACE points, use −264 Gt/yr and −135 Gt/yr from 2002 and set `sea_level_source` to `nasa-science-summary-fallback`. After 2025, multiply the rate by the warming scale against warming(2025). Set acceleration to 0.
 
@@ -554,7 +570,7 @@ Hard-code these boxes inside `model/` (ocean cells only, masked cells dropped):
 - Northern Sea Route: latitude 66–80 °N, longitude 30–180 °E
 - Northwest Passage: latitude 68–75 °N, longitude 140–60 °W
 
-A month is open when the mean remaining concentration is `< 15`. This is a hackathon proxy for a navigable season, not a shipping analysis. The wording in the impact JSON definition is the wording the panel shows.
+The monthly mean concentration in the box is anchored at mid-month and linearly interpolated to each day (December joined to January of the same year). A day is open when that value is `< 15`. This is a hackathon proxy for a navigable season, not a shipping analysis. The wording in the impact JSON definition is the wording the panel shows. `method` names the interpolation.
 
 ## Fixture banner
 
