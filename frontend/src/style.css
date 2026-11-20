@@ -1,9 +1,9 @@
 :root {
-  --bg: #121410;
-  --ink: #e6e1d6;
-  --muted: #8d887c;
-  --faint: #5e5b53;
-  --line: #2c2e28;
+  --bg: #05070e;
+  --ink: #e7eef6;
+  --muted: #8e9aab;
+  --faint: #5c6a7c;
+  --line: #1b2636;
   --sage: #8eae9a;
   --brass: #c6a56a;
   --clay: #c4845a;
@@ -57,7 +57,7 @@ button {
 .banner {
   grid-area: banner;
   margin: 0 0 8px;
-  color: #cbb892;
+  color: #b7c6d8;
   font-size: 12px;
   line-height: 1.3;
 }
@@ -191,7 +191,7 @@ h2 { font-size: 22px; }
   top: calc(100% + 8px);
   width: min(320px, 80vw);
   padding: 14px 14px 10px;
-  background: #181a16;
+  background: #0b1220;
   border: 1px solid var(--line);
 }
 
@@ -337,10 +337,23 @@ button:focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; }
   z-index: 6;
   width: min(400px, 100vw);
   overflow: auto;
-  padding: 22px 22px 32px;
+  padding: 18px 48px 32px 22px;
   background: var(--bg);
   border-left: 1px solid var(--line);
 }
+
+.drawer-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.drawer-close:hover { color: var(--ink); }
 
 .block { margin-top: 16px; }
 

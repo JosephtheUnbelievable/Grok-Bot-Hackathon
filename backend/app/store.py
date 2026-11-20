@@ -539,36 +539,39 @@ class DataStore:
         return f"{source} through {last}"
 
     def _prefetch_grids(self, client) -> None:
-        wanted = []
+        """Every non-gap month with a CSV extent. The logistic needs that history."""
         with self.lock:
             monthly = dict(self.monthly)
-        for pole, default_month in (("north", 9), ("south", 2)):
-            latest = _latest_month(monthly, pole)
-            if latest:
-                wanted.append((pole, latest[0], latest[1]))
-            years = [y for (p, y, m), rec in monthly.items() if p == pole and m == default_month and rec.extent_km2 is not None]
-            if years:
-                wanted.append((pole, max(years), default_month))
-        # A known-good September, so /ice/north/2024/9 works even if the newest tif lags.
-        wanted.append(("north", 2024, 9))
-        # One recent north grid per calendar month so corridor fallbacks have a template.
-        for month in range(1, 13):
-            years = [
-                y
-                for (p, y, m), rec in monthly.items()
-                if p == "north" and m == month and rec.extent_km2 is not None and not rec.gap_masked
-            ]
-            if years:
-                wanted.append(("north", max(years), month))
+        wanted = []
         seen = set()
-        unique = []
-        for item in wanted:
-            if item not in seen and not is_gap_month(item[1], item[2]):
-                seen.add(item)
-                unique.append(item)
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            list(pool.map(lambda spec: self.ensure_grid(*spec, client=client), unique))
+        for (pole, year, month), rec in monthly.items():
+            if rec.gap_masked or is_gap_month(year, month) or rec.extent_km2 is None:
+                continue
+            key = (pole, year, month)
+            if key not in seen:
+                seen.add(key)
+                wanted.append(key)
+        # A known-good September, so /ice/north/2024/9 works even if the newest tif lags.
+        for extra in (("north", 2024, 9), ("south", 2024, 9)):
+            if extra not in seen and not is_gap_month(extra[1], extra[2]):
+                seen.add(extra)
+                wanted.append(extra)
+        if not wanted:
+            self._update_concentration_feed()
+            return
+        logger.info("prefetching %s concentration grids", len(wanted))
+        workers = min(12, max(4, len(wanted)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(lambda spec: self._ensure_grid_retry(*spec, client=client), wanted))
         self._update_concentration_feed()
+
+    def _ensure_grid_retry(self, pole: str, year: int, month: int, client=None):
+        grid = self.ensure_grid(pole, year, month, client=client)
+        if grid is not None:
+            return grid
+        # A dropped connection marks the key missing. One retry covers a blip.
+        self._missing.discard((pole, year, month))
+        return self.ensure_grid(pole, year, month, client=client)
 
     def ensure_grid(self, pole: str, year: int, month: int, client=None) -> CleanGrid | None:
         if is_gap_month(year, month):

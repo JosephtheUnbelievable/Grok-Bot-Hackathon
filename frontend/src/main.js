@@ -170,15 +170,25 @@ function bindToggle(button, panel, { focus = false } = {}) {
 const optionsUi = bindToggle($("options-btn"), $("options-pop"), { focus: true });
 const healthUi = bindToggle($("health-btn"), $("health-pop"));
 $("drawer-btn").addEventListener("click", () => setDrawer($("drawer").hidden));
+$("drawer-close").addEventListener("click", () => {
+  setDrawer(false);
+  $("drawer-btn").focus();
+});
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (!$("options-pop").hidden) {
     optionsUi.close();
     $("options-btn").focus();
+    return;
   }
   if (!$("health-pop").hidden) {
     healthUi.close();
     $("health-btn").focus();
+    return;
+  }
+  if (!$("drawer").hidden) {
+    setDrawer(false);
+    $("drawer-btn").focus();
   }
 });
 document.addEventListener("click", (event) => {
