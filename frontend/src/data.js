@@ -86,24 +86,17 @@ export function paintIce(ice) {
       const theta = (lon * Math.PI) / 180;
       const value = sample(cx + Math.sin(theta) * radius, cy - Math.cos(theta) * radius);
       if (value == null || value < 15) continue;
-      const t = Math.min(1, (value - 15) / 85);
-      const alpha = value < 30 ? Math.round(((value - 15) / 15) * 255) : 230;
+      const edge = Math.min(1, (value - 15) / 4);
+      const body = Math.min(1, (value - 15) / 85);
+      const t = Math.pow(body, 0.55);
       const o = (y * 1024 + x) * 4;
       data[o] = Math.round(93 + (255 - 93) * t);
       data[o + 1] = Math.round(173 + (255 - 173) * t);
       data[o + 2] = Math.round(226 + (255 - 226) * t);
-      data[o + 3] = alpha;
+      data[o + 3] = Math.round(255 * edge);
     }
   }
   ctx.putImageData(img, 0, 0);
-  const soft = document.createElement("canvas");
-  soft.width = 1024;
-  soft.height = 512;
-  const softCtx = soft.getContext("2d");
-  softCtx.filter = "blur(3px)";
-  softCtx.drawImage(canvas, 0, 0);
-  ctx.clearRect(0, 0, 1024, 512);
-  ctx.drawImage(soft, 0, 0);
   return canvas;
 }
 
