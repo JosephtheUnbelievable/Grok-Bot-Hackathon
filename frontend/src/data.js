@@ -108,8 +108,9 @@ export function paintIce(ice) {
     for (let x = 0; x < 1024; x += 1) {
       const lon = -180 + (x / 1023) * 360;
       const theta = (lon * Math.PI) / 180;
-      const wobble = (hash(Math.round(lon / 8), south ? 2 : 1) - 0.5) * 0.18
-        + Math.sin(theta * 6 + (south ? 1 : 0)) * 0.05;
+      const n1 = hash(lon * 0.22, colat * 0.7 + (south ? 4 : 0));
+      const n2 = hash(lon * 1.6, colat * 2.4);
+      const wobble = (n1 - 0.5) * 0.1 + Math.sin(theta * 5) * 0.035;
       const unit = ((theta % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
       const pos = (unit / (Math.PI * 2)) * rays;
       const i0 = Math.floor(pos) % rays;
@@ -123,13 +124,18 @@ export function paintIce(ice) {
       const mean = tone[i0] * (1 - f) + tone[i1] * f;
       const fringe = Math.min(1, Math.max(0, (along - 0.82) / 0.18));
       const pack = Math.min(1, Math.max(0, (mean - 15) / 70));
-      const white = Math.min(1, 0.72 + pack * 0.28 - fringe * 0.45);
-      const grain = (hash(x, y) - 0.5) * (fringe > 0.2 ? 18 : 8);
+      const white = Math.min(1, 0.78 + pack * 0.22 - fringe * 0.35);
+      const floe = hash(Math.floor(lon / 7 + 20), Math.floor(colat * 4));
+      const crack = floe < 0.07 ? -26 : 0;
+      const grit = (n2 - 0.5) * 26 + (hash(x * 0.35, y * 0.35) - 0.5) * 14;
+      const shade = grit + crack;
       const o = (y * 1024 + x) * 4;
-      data[o] = Math.min(255, Math.round(186 + (255 - 186) * white + grain));
-      data[o + 1] = Math.min(255, Math.round(214 + (255 - 214) * white + grain));
-      data[o + 2] = Math.min(255, Math.round(226 + (255 - 226) * white + grain * 0.4));
-      data[o + 3] = along > 0.94 ? Math.round(255 * (1 - along) / 0.06) : 255;
+      const chan = (base) => Math.max(0, Math.min(255, Math.round(base + (255 - base) * white + shade)));
+      data[o] = chan(176);
+      data[o + 1] = chan(208);
+      data[o + 2] = Math.max(0, Math.min(255, Math.round(222 + (255 - 222) * white + shade * 0.45)));
+      const fade = along < 0.84 ? 1 : Math.max(0, 1 - (along - 0.84) / 0.16);
+      data[o + 3] = Math.round(255 * fade * fade);
     }
   }
   ctx.putImageData(img, 0, 0);
