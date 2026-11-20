@@ -344,8 +344,11 @@ function extentReadout() {
   if (state.iceMeta && (state.iceMeta.extentKm2 === null || Number.isNaN(state.iceMeta.extentKm2))) {
     return { value: "—", unit: "no extent" };
   }
-  if (state.iceMeta) {
+  if (state.iceMeta && iceMetaMatchesSelection(state.iceMeta)) {
     return { value: millionKm2(state.iceMeta.extentKm2), unit: "million km²" };
+  }
+  if (state.iceMeta) {
+    return { value: "—", unit: "million km²" };
   }
   if (state.feedDown) return { value: "—", unit: "feed down" };
   return { value: "—", unit: "million km²" };
@@ -409,17 +412,57 @@ function renderPanel() {
       shipRows += 1;
     }
     if (shipRows) {
-      ship.append(el("p", "proxy", "Proxy, not a route solver."));
+      const method = nsr?.method || nwp?.method || "";
+      const daily = method.includes("daily-linear-interpolation");
+      ship.append(
+        el(
+          "p",
+          "proxy",
+          daily
+            ? "Proxy, not a route solver. Open days are a daily interpolation of the monthly mean, not 30-day blocks."
+            : "Proxy, not a route solver.",
+        ),
+      );
       body.append(ship);
     }
 
     const communities = impact.communities || {};
     const winter = el("div", "block");
     let winterRows = 0;
-    if (finite(communities.ice_free_september_year)) {
-      winter.append(el("h3", null, "Winter ice"));
-      winter.append(stat("First ice-free September", String(communities.ice_free_september_year)));
+    const iceYear = communities.ice_free_september_year;
+    const iceLabel = finite(iceYear)
+      ? String(iceYear)
+      : communities.ice_free_september_label || "not before 2100";
+    winter.append(el("h3", null, "Winter ice"));
+    winter.append(stat("First ice-free September", iceLabel));
+    winterRows += 1;
+    if (!finite(iceYear) && finite(communities.minimum_september_extent_km2)) {
+      const when = finite(communities.minimum_september_extent_year)
+        ? ` in ${communities.minimum_september_extent_year}`
+        : "";
+      winter.append(
+        stat(
+          "Lowest September extent",
+          `${millionKm2(communities.minimum_september_extent_km2)} million km²${when}`,
+        ),
+      );
       winterRows += 1;
+    }
+    const placeNames = ["Utqiagvik", "Kivalina", "Shishmaref", "Tuktoyaktuk"];
+    const places = communities.places;
+    if (places && typeof places === "object") {
+      for (const name of placeNames) {
+        const place = places[name];
+        if (!place || typeof place !== "object") continue;
+        const bits = [];
+        if (finite(place.february_percent)) bits.push(`February ${place.february_percent}%`);
+        if (finite(place.open_water_days)) bits.push(`${place.open_water_days} open-water days`);
+        if (!bits.length) continue;
+        winter.append(stat(name, bits.join(" · ")));
+        winterRows += 1;
+      }
+    } else if (communities.places_method) {
+      winter.append(el("p", "proxy", communities.places_method));
     }
     if (finite(communities.winter_ice_loss_index)) {
       if (!winterRows) winter.append(el("h3", null, "Winter ice"));
@@ -466,6 +509,9 @@ function renderPanel() {
     if (winterRows) {
       addDef(details, "First ice-free September", communities.definitions?.ice_free_september_year);
       addDef(details, "Winter sea-ice loss", communities.definitions?.winter_ice_loss_index);
+      if (places && typeof places === "object") {
+        addDef(details, "Towns", communities.definitions?.places || communities.places_method);
+      }
     }
     if (seaRows && sea.baseline) addDef(details, "Sea level", sea.baseline);
     if (details.querySelector("p")) body.append(details);
@@ -602,13 +648,45 @@ function rejectedDown(result) {
   return result.status === "rejected" && result.reason?.name !== "AbortError" && result.reason?.feedDown !== false;
 }
 
+function iceMetaMatchesSelection(meta) {
+  if (!meta) return false;
+  const year = Number(meta.year);
+  const month = Number(meta.month);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return true;
+  return year === Number(state.year) && month === Number(state.month);
+}
+
 async function refresh() {
   const my = ++token;
   if (inflight) inflight.abort();
   const ac = new AbortController();
   inflight = ac;
+  // Health first, so the default year is the latest observed year before the ice
+  // image is requested. Setting the year after the image arrived labeled 2026
+  // while the request was still /ice/north/2024/9.
+  let health;
+  try {
+    health = { status: "fulfilled", value: await loadHealth(ac.signal) };
+  } catch (reason) {
+    health = { status: "rejected", reason };
+  }
+  if (my !== token) return;
+  const healthFailed = health.status === "rejected" && health.reason?.name !== "AbortError";
+  if (health.status === "fulfilled") {
+    state.health = health.value;
+    if (health.value?.observed_through) state.observedThrough = health.value.observed_through;
+    if (!state.yearTouched && state.observedThrough?.year) {
+      const observedYear = Number(state.observedThrough.year);
+      if (Number.isFinite(observedYear) && observedYear !== Number(state.year)) {
+        state.year = observedYear;
+        paintInstant();
+      }
+    }
+  } else if (healthFailed && !state.health) {
+    state.health = null;
+  }
+
   const settled = await Promise.allSettled([
-    loadHealth(ac.signal),
     loadIce(state, ac.signal),
     loadExtent(state, ac.signal),
     loadImpact(state, ac.signal),
@@ -617,31 +695,24 @@ async function refresh() {
   if (my !== token) return;
   if (settled.every((item) => item.status === "rejected" && item.reason?.name === "AbortError")) return;
 
-  const [health, ice, extent, impact, backtest] = settled;
+  const [ice, extent, impact, backtest] = settled;
   state.queryError = "";
   const iceFailed = ice.status === "rejected" && ice.reason?.name !== "AbortError";
   const impactFailed = impact.status === "rejected" && impact.reason?.name !== "AbortError";
-  const healthFailed = health.status === "rejected" && health.reason?.name !== "AbortError";
   state.feedDown = rejectedDown(health) || rejectedDown(ice);
-
-  if (health.status === "fulfilled") {
-    state.health = health.value;
-    if (health.value?.observed_through) state.observedThrough = health.value.observed_through;
-    if (!state.yearTouched && state.observedThrough?.year) {
-      state.year = state.observedThrough.year;
-    }
-  } else if (healthFailed && !state.health) {
-    state.health = null;
-  }
 
   if (ice.status === "fulfilled") {
     const value = ice.value;
-    state.iceMeta = value.meta;
     if (value.meta?.observedThrough) state.observedThrough = value.meta.observedThrough;
-    const hide = value.meta.gapMasked || value.meta.extentKm2 == null || isGap(state.year, state.month);
-    if (hide) globe?.clearIce();
-    else if (value.canvas) globe?.setIceCanvas(value.canvas);
-    else if (value.imageUrl) globe?.setIceUrl(value.imageUrl);
+    if (!iceMetaMatchesSelection(value.meta)) {
+      // Stale image for a different year or month than the label.
+    } else {
+      state.iceMeta = value.meta;
+      const hide = value.meta.gapMasked || value.meta.extentKm2 == null || isGap(state.year, state.month);
+      if (hide) globe?.clearIce();
+      else if (value.canvas) globe?.setIceCanvas(value.canvas);
+      else if (value.imageUrl) globe?.setIceUrl(value.imageUrl);
+    }
   } else if (iceFailed) {
     if (isGap(state.year, state.month)) {
       globe?.clearIce();

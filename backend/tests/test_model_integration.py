@@ -129,6 +129,15 @@ def test_real_model_serves_forecasts_and_scenarios_diverge(tmp_path):
             impact_body["sea_level"]["greenland_mm"] + impact_body["sea_level"]["antarctica_mm"],
             abs=0.02,
         )
+        sea = impact_body["sea_level"]
+        assert sea["low_mm"] <= sea["total_mm"] <= sea["high_mm"]
+        communities = impact_body["communities"]
+        if communities["ice_free_september_year"] is None:
+            assert communities["ice_free_september_label"] == "not before 2100"
+        else:
+            assert communities["ice_free_september_label"] == str(communities["ice_free_september_year"])
+        assert communities["minimum_september_extent_km2"] is not None
+        assert "places" in communities
         impacts[scenario] = impact_body
 
     assert extents["ssp585"][2050]["extent_km2"] < extents["ssp126"][2050]["extent_km2"]

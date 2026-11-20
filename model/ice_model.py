@@ -19,7 +19,10 @@ Cell centres use the published grid definition (EPSG:3411 / Hughes 1980):
 - Hughes 1980: a = 6,378,273 m, inverse flattening 298.279411123064
 
 Any other shape, including the tiny grids used in unit tests, leaves the
-winter index ``None`` and both shipping seasons at 0 days / no opening date.
+winter index ``None``, both shipping seasons at 0 days / no opening date,
+and ``community_places`` null. On the 304×448 grid, open days are a daily
+linear interpolation of the monthly mean (not 30-day blocks), and Utqiagvik,
+Kivalina, Shishmaref, and Tuktoyaktuk are sampled within 100 km.
 The south grid is not georeferenced; both proxies are Arctic-only.
 
 Other choices that do not change the dataclass contract are listed in
@@ -30,6 +33,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -171,6 +175,7 @@ class ShippingSeason:
     open_season_days: int
     opening_date: str | None
     open_month_count: int
+    method: str = ""
 
 
 @dataclass(frozen=True)
@@ -186,6 +191,31 @@ class ImpactResult:
     low_mm: float
     high_mm: float
     sea_level_source: Literal["grace-gracefo", "nasa-science-summary-fallback"]
+    community_places: dict | None = None
+    places_method: str = ""
+
+
+# Towns the impact panel names. Coordinates are the town centres.
+COMMUNITIES: tuple[tuple[str, float, float], ...] = (
+    ("Utqiagvik", 71.2906, -156.7886),
+    ("Kivalina", 67.7269, -164.5333),
+    ("Shishmaref", 66.2567, -166.0719),
+    ("Tuktoyaktuk", 69.4453, -133.0342),
+)
+COMMUNITY_RADIUS_KM = 100.0
+SHIPPING_METHOD = (
+    "daily-linear-interpolation: monthly mean concentration is anchored at mid-month "
+    "and linearly interpolated to each day, December joined to January of the same year. "
+    "A day is open when that value is below 15%. February 29 is included in leap years."
+)
+PLACES_METHOD = (
+    "Mean of unmasked 25 km cells within 100 km of the town on the median ice grid. "
+    "february_percent is February. open_water_days uses the same daily interpolation "
+    "as the shipping proxy (a day is open below 15%)."
+)
+PLACES_UNAVAILABLE = (
+    "Per-town ice needs the NSIDC 25 km north grid (304 by 448). This fit does not have it."
+)
 
 
 @dataclass(frozen=True)
@@ -520,23 +550,75 @@ def _nearest_mass(times: np.ndarray, masses: np.ndarray, year: float) -> float:
     return float(masses[int(order[0])])
 
 
+def _scale_value(scale_at_year: Callable[[int], float], year_i: int) -> float:
+    try:
+        value = float(scale_at_year(int(year_i)))
+    except Exception:
+        return 1.0
+    if not math.isfinite(value):
+        return 1.0
+    return max(value, 0.0)
+
+
+def _loss_rate_gt_yr(times: np.ndarray, masses: np.ndarray) -> float:
+    """Mission-mean mass trend, Gt/yr. Zero when the sheet did not lose mass.
+
+    The fitted quadratic acceleration is deliberately not extrapolated. On GRACE
+    mascons that acceleration comes out positive: loss slows, the parabola turns
+    up, and sea level falls. Warming multiplies only that term, so a hotter
+    scenario turns up sooner and ends lower. The rate that is kept is the change
+    GRACE measured, last sample minus first, per year.
+    """
+    span = float(times[-1] - times[0])
+    if span <= 1e-9:
+        return 0.0
+    secant = float(masses[-1] - masses[0]) / span
+    if not math.isfinite(secant) or secant >= 0.0:
+        return 0.0
+    return secant
+
+
+def _mass_at(
+    times: np.ndarray,
+    masses: np.ndarray,
+    last: float,
+    year: float,
+    scale_at_year: Callable[[int], float],
+) -> float:
+    """Mass anomaly at ``year``.
+
+    Inside the record this is the nearest sample. After it, mass continues from
+    the last sample at ``loss_rate * warming_scale(t)``. The rate is negative or
+    zero and the scale is non-negative, so mass does not increase and sea level
+    does not fall. A larger scale (hotter pathway) removes at least as much mass.
+    """
+    if year <= last:
+        return _nearest_mass(times, masses, year)
+    loss = _loss_rate_gt_yr(times, masses)
+    mass = float(masses[-1])
+    if loss == 0.0:
+        return mass
+    t = float(last)
+    target = float(year)
+    while t < target - 1e-12:
+        year_i = int(math.floor(t + 1e-9))
+        next_t = min(target, float(year_i + 1))
+        if next_t <= t:
+            next_t = min(target, t + 1.0)
+        mass += loss * _scale_value(scale_at_year, year_i) * (next_t - t)
+        t = next_t
+    return mass
+
+
 def _mass_mm(
     times: np.ndarray,
     masses: np.ndarray,
-    intercept: float,
-    rate: float,
-    acceleration: float,
-    t0: float,
     last: float,
     year: float,
-    scale: float,
+    scale_at_year: Callable[[int], float],
 ) -> float:
     first = float(masses[0])
-    if year <= last:
-        mass = _nearest_mass(times, masses, year)
-    else:
-        dt = year - t0
-        mass = intercept + rate * dt + 0.5 * acceleration * dt * dt * scale
+    mass = _mass_at(times, masses, last, year, scale_at_year)
     return -(mass - first) / GT_PER_MM
 
 
@@ -650,37 +732,22 @@ class _SheetCurve:
         self.resid = self.masses - self.fitted
         self.last = float(self.times[-1])
 
-    def point_mm(self, year: float, scale: float) -> float:
-        return _mass_mm(
-            self.times,
-            self.masses,
-            self.intercept,
-            self.rate,
-            self.acceleration,
-            self.t0,
-            self.last,
-            year,
-            scale,
-        )
+    def point_mm(self, year: float, scale_at_year: Callable[[int], float]) -> float:
+        return _mass_mm(self.times, self.masses, self.last, year, scale_at_year)
 
-    def bootstrap_mm(self, year: float, scale: float, rng: np.random.Generator) -> np.ndarray:
+    def bootstrap_mm(self, year: float, scale_at_year: Callable[[int], float], rng: np.random.Generator) -> np.ndarray:
+        """Residual bootstrap of the mission-mean rate.
+
+        Each draw rebuilds the series as the quadratic fit plus a resampled
+        residual, then applies the same projection as ``point_mm``. Refitting
+        the quadratic and extrapolating it is what bent real GRACE curves back.
+        """
         n = int(self.times.size)
         out = np.empty(N_BOOT, dtype=np.float64)
         for draw in range(N_BOOT):
             index = rng.integers(0, n, size=n)
             starred = self.fitted + self.resid[index]
-            intercept, rate, acceleration, t0 = _lstsq_quadratic(self.times, starred)
-            out[draw] = _mass_mm(
-                self.times,
-                starred,
-                intercept,
-                rate,
-                acceleration,
-                t0,
-                self.last,
-                year,
-                scale,
-            )
+            out[draw] = _mass_mm(self.times, starred, self.last, year, scale_at_year)
         return out
 
 
@@ -734,6 +801,7 @@ class IceModel:
         self._lon: np.ndarray | None = None
         self._greenland: _SheetCurve | None = None
         self._antarctica: _SheetCurve | None = None
+        self._community_mask: dict[str, np.ndarray] | None = None
         self._extent_cache: dict = {}
         self._impact_cache: dict = {}
         self._conc_cache: dict = {}
@@ -1140,6 +1208,7 @@ class IceModel:
     def _impact(self, year: int, scenario: ScenarioId, blend: float | None) -> ImpactResult:
         northern, northwest = self._shipping(year, scenario, blend)
         greenland_mm, antarctica_mm, low_mm, high_mm, source = self._sea_level(year, scenario, blend)
+        places, places_method = self._places(year, scenario, blend)
         return ImpactResult(
             is_forecast=self._year_is_forecast(year),
             northern_sea_route=northern,
@@ -1152,6 +1221,8 @@ class IceModel:
             low_mm=low_mm,
             high_mm=high_mm,
             sea_level_source=source,
+            community_places=places,
+            places_method=places_method,
         )
 
     def _year_is_forecast(self, year: int) -> bool:
@@ -1195,24 +1266,68 @@ class IceModel:
         if dateline:
             # Longitude 180 and -180 are the same meridian, the eastern edge of the NSR box.
             box = box | ((self._lat >= lat_min) & (self._lat <= lat_max) & np.isclose(self._lon, -180.0))
-        open_months: list[int] = []
+        means = self._masked_monthly_means(year, scenario, blend, box)
+        days, opening, count = _open_season_from_means(int(year), means)
+        return ShippingSeason(days, opening, count, SHIPPING_METHOD)
+
+    def _masked_monthly_means(
+        self,
+        year: int,
+        scenario: str,
+        blend: float | None,
+        mask: np.ndarray,
+    ) -> dict[int, float]:
+        means: dict[int, float] = {}
+        if self._lat is None or mask.shape != self._lat.shape or not np.any(mask):
+            return means
         for month in range(1, 13):
             grid = self._median_array("north", year, month, scenario, blend)
-            if grid is None or grid.shape != self._lat.shape:
+            if grid is None or grid.shape != mask.shape:
                 continue
-            values = grid[box]
+            values = grid[mask]
             values = values[values <= 100]
             if values.size == 0:
                 continue
-            if float(values.mean()) < EXTENT_THRESHOLD:
-                open_months.append(month)
-        opening = None
-        for month in open_months:
-            if month >= 6:
-                opening = f"{year:04d}-{month:02d}-01"
-                break
-        days = sum(28 if month == 2 else 30 for month in open_months)
-        return ShippingSeason(days, opening, len(open_months))
+            means[month] = float(values.mean())
+        return means
+
+    def _community_masks(self) -> dict[str, np.ndarray]:
+        if self._community_mask is not None:
+            return self._community_mask
+        masks: dict[str, np.ndarray] = {}
+        if self._lat is not None and self._lon is not None:
+            for name, clat, clon in COMMUNITIES:
+                masks[name] = _within_km(self._lat, self._lon, clat, clon, COMMUNITY_RADIUS_KM)
+        self._community_mask = masks
+        return masks
+
+    def _places(
+        self,
+        year: int,
+        scenario: str,
+        blend: float | None,
+    ) -> tuple[dict | None, str]:
+        if self._lat is None or self._lon is None:
+            return None, PLACES_UNAVAILABLE
+        places: dict[str, dict | None] = {}
+        any_value = False
+        for name, mask in self._community_masks().items():
+            means = self._masked_monthly_means(year, scenario, blend, mask)
+            if not means:
+                places[name] = None
+                continue
+            any_value = True
+            days, _opening, _count = _open_season_from_means(int(year), means)
+            february = means.get(2)
+            february_percent = None if february is None else int(np.clip(np.rint(february), 0, 100))
+            places[name] = {
+                "february_percent": february_percent,
+                "below_15": None if february_percent is None else bool(february_percent < EXTENT_THRESHOLD),
+                "open_water_days": int(days),
+            }
+        if not any_value:
+            return places, PLACES_METHOD
+        return places, PLACES_METHOD
 
     def _winter_index(self, year: int, scenario: str, blend: float | None) -> float | None:
         if self._lat is None:
@@ -1283,12 +1398,17 @@ class IceModel:
         )
         combined = greenland_draws + antarctica_draws
         low, high = np.percentile(combined, [10, 90], method="linear")
+        total = greenland_mm + antarctica_mm
+        # The point estimate is the mission-mean path. A residual draw can sit
+        # entirely above or below it; the reported band still has to contain it.
+        low_mm = min(float(low), total)
+        high_mm = max(float(high), total)
         source: Literal["grace-gracefo", "nasa-science-summary-fallback"]
         if self._greenland is None and self._antarctica is None:
             source = SOURCE_NASA  # type: ignore[assignment]
         else:
             source = SOURCE_GRACE  # type: ignore[assignment]
-        return greenland_mm, antarctica_mm, float(low), float(high), source
+        return greenland_mm, antarctica_mm, low_mm, high_mm, source
 
     def _sheet_contribution(
         self,
@@ -1302,11 +1422,20 @@ class IceModel:
         if curve is None:
             mm = -self._fallback_mass(year, fallback_rate, scenario, blend) / GT_PER_MM
             return mm, np.full(N_BOOT, mm, dtype=np.float64)
-        scale = 1.0
-        if float(year) > curve.last:
-            scale = self._warming_scale(year, int(math.floor(curve.last + 1e-9)), scenario, blend)
-        mm = curve.point_mm(float(year), scale)
-        return mm, curve.bootstrap_mm(float(year), scale, rng)
+        scale_at = self._scale_after(curve, scenario, blend)
+        mm = curve.point_mm(float(year), scale_at)
+        return mm, curve.bootstrap_mm(float(year), scale_at, rng)
+
+    def _scale_after(self, curve: _SheetCurve, scenario: str, blend: float | None) -> Callable[[int], float]:
+        """Warming(year) / warming(last GRACE year). Years inside the record stay at 1."""
+        ref = int(math.floor(float(curve.last) + 1e-9))
+
+        def scale_at(year_i: int) -> float:
+            if int(year_i) <= ref:
+                return 1.0
+            return self._warming_scale(int(year_i), ref, scenario, blend)
+
+        return scale_at
 
     def _fallback_mass(self, year: int, rate: float, scenario: str, blend: float | None) -> float:
         """NASA summary rate from 2002. After 2025 only the later segment is rescaled.
@@ -1409,6 +1538,83 @@ class IceModel:
             else:
                 skill = 1.0 - rmse / climatology_rmse
         return PoleScore(rmse, bias, n, skill)
+
+
+def _month_lengths(year: int) -> list[int]:
+    leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+    return [31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+
+def _interp_wrapped(samples: list[tuple[float, float]], doy: float) -> float:
+    for index in range(len(samples) - 1):
+        left_day, left_value = samples[index]
+        right_day, right_value = samples[index + 1]
+        if left_day <= doy <= right_day:
+            span = right_day - left_day
+            if span == 0.0:
+                return left_value
+            return left_value + (doy - left_day) / span * (right_value - left_value)
+    return samples[-1][1]
+
+
+def _open_season_from_means(year: int, means: dict[int, float]) -> tuple[int, str | None, int]:
+    """Count open days by linear interpolation of monthly mean concentration.
+
+    Each available month is anchored at its midpoint. December of this year is
+    joined to January of this year so the seasonal cycle closes. A day is open
+    when the interpolated concentration is below 15%. ``opening_date`` is the
+    first open day on or after 1 June.
+    """
+    lengths = _month_lengths(year)
+    year_days = float(sum(lengths))
+    if not means or year_days <= 0:
+        return 0, None, 0
+    centers: list[float] = []
+    cursor = 0.0
+    for length in lengths:
+        centers.append(cursor + length / 2.0)
+        cursor += length
+    samples = [
+        (centers[month - 1], float(value))
+        for month, value in means.items()
+        if 1 <= int(month) <= 12 and math.isfinite(float(value))
+    ]
+    samples.sort()
+    if not samples:
+        return 0, None, 0
+    wrapped = [
+        (samples[-1][0] - year_days, samples[-1][1]),
+        *samples,
+        (samples[0][0] + year_days, samples[0][1]),
+    ]
+    june1 = sum(lengths[:5]) + 1
+    open_days = 0
+    months_open = [False] * 12
+    opening = None
+    day_origin = 0
+    for month_index, length in enumerate(lengths):
+        for day in range(1, length + 1):
+            value = _interp_wrapped(wrapped, day_origin + day - 0.5)
+            if value < EXTENT_THRESHOLD:
+                open_days += 1
+                months_open[month_index] = True
+                if opening is None and day_origin + day >= june1:
+                    opening = f"{year:04d}-{month_index + 1:02d}-{day:02d}"
+        day_origin += length
+    return open_days, opening, int(sum(months_open))
+
+
+def _within_km(lat: np.ndarray, lon: np.ndarray, clat: float, clon: float, km: float) -> np.ndarray:
+    """Cells whose centre is within ``km`` of a town. Longitude takes the short arc."""
+    radius = 6371.0
+    phi1 = np.radians(lat)
+    phi2 = math.radians(clat)
+    dphi = np.radians(lat - clat)
+    dlon = np.radians(lon - clon)
+    dlon = (dlon + np.pi) % (2.0 * np.pi) - np.pi
+    haversine = np.sin(dphi / 2.0) ** 2 + np.cos(phi1) * math.cos(phi2) * np.sin(dlon / 2.0) ** 2
+    distance = 2.0 * radius * np.arcsin(np.minimum(1.0, np.sqrt(np.clip(haversine, 0.0, 1.0))))
+    return distance <= km
 
 
 def _fit_sheet(points: list[MassPoint]) -> _SheetCurve | None:
