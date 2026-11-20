@@ -54,99 +54,82 @@
       </p>
 
       <form class="bar" id="controls" autocomplete="off">
-        <div class="control">
-          <div class="control-head">
-            <label for="year">Year</label>
-            <output id="year-out" for="year">2024</output>
-          </div>
-          <div class="slider">
-            <input
-              id="year"
-              type="range"
-              min="1979"
-              max="2100"
-              step="1"
-              value="2024"
-              aria-valuemin="1979"
-              aria-valuemax="2100"
-              aria-valuenow="2024"
-              aria-valuetext="2024"
-            />
-            <span id="today-tick" class="today-tick" hidden></span>
-          </div>
-          <div class="ends">
-            <span>1979</span>
-            <span id="record-label"></span>
-            <span>2100</span>
-          </div>
-        </div>
-
-        <div class="control control-scenario">
-          <div class="control-head">
-            <label for="blend">Scenario</label>
-            <output id="blend-out" for="blend">blend 2.0</output>
-          </div>
-          <input
-            id="blend"
-            type="range"
-            min="0"
-            max="4"
-            step="0.1"
-            value="2"
-            aria-valuemin="0"
-            aria-valuemax="4"
-            aria-valuenow="2"
-            aria-valuetext="SSP2-4.5, blend 2.0"
-            aria-describedby="scenario-help"
-          />
-          <div class="stops">
-            <span>SSP1-1.9</span>
-            <span>SSP1-2.6</span>
-            <span>SSP2-4.5</span>
-            <span>SSP3-7.0</span>
-            <span>SSP5-8.5</span>
-          </div>
-        </div>
-
-        <div class="menu">
-          <button
-            type="button"
-            id="options-btn"
-            class="text-btn"
-            aria-expanded="false"
-            aria-controls="options-pop"
-            aria-haspopup="dialog"
-          >
-            Sep · North · Median
-          </button>
-          <div
-            id="options-pop"
-            class="popover pop-up"
-            role="dialog"
-            aria-label="Month, pole, and band"
-            hidden
-          >
-            <div class="control">
-              <div class="control-head">
-                <label for="month">Month</label>
-                <output id="month-out" for="month">September</output>
-              </div>
-              <input
-                id="month"
-                type="range"
-                min="1"
-                max="12"
-                step="1"
-                value="9"
-                aria-valuemin="1"
-                aria-valuemax="12"
-                aria-valuenow="9"
-                aria-valuetext="September"
-              />
-              <div class="ends"><span>1</span><span>12</span></div>
+        <div class="toolbar">
+          <section class="tool" aria-labelledby="year-label">
+            <div class="control-head">
+              <label id="year-label" for="year">Year</label>
+              <output id="year-out" for="year">2024</output>
             </div>
-            <fieldset>
-              <legend>Pole</legend>
+            <div class="slider">
+              <input
+                id="year"
+                type="range"
+                min="1979"
+                max="2100"
+                step="1"
+                value="2024"
+                aria-valuemin="1979"
+                aria-valuemax="2100"
+                aria-valuenow="2024"
+                aria-valuetext="2024"
+              />
+              <span id="today-tick" class="today-tick" hidden></span>
+            </div>
+            <div class="ends">
+              <span>1979</span>
+              <span id="record-label"></span>
+              <span>2100</span>
+            </div>
+          </section>
+
+          <section class="tool" aria-labelledby="blend-label">
+            <div class="control-head">
+              <label id="blend-label" for="blend">Scenario</label>
+              <output id="blend-out" for="blend">blend 2.0</output>
+            </div>
+            <input
+              id="blend"
+              type="range"
+              min="0"
+              max="4"
+              step="0.1"
+              value="2"
+              aria-valuemin="0"
+              aria-valuemax="4"
+              aria-valuenow="2"
+              aria-valuetext="SSP2-4.5, blend 2.0"
+              aria-describedby="scenario-help"
+            />
+            <div class="stops" id="stops">
+              <span data-stop="0">SSP1-1.9</span>
+              <span data-stop="1">SSP1-2.6</span>
+              <span data-stop="2">SSP2-4.5</span>
+              <span data-stop="3">SSP3-7.0</span>
+              <span data-stop="4">SSP5-8.5</span>
+            </div>
+            <p id="scenario-help" class="help"></p>
+          </section>
+
+          <section class="tool tool-view" aria-label="Data view">
+            <div class="control-head">
+              <span class="tool-kicker">Data view</span>
+              <output id="month-out" for="month">September</output>
+            </div>
+            <label class="sr" for="month">Month</label>
+            <input
+              id="month"
+              type="range"
+              min="1"
+              max="12"
+              step="1"
+              value="9"
+              aria-valuemin="1"
+              aria-valuemax="12"
+              aria-valuenow="9"
+              aria-valuetext="September"
+            />
+            <fieldset class="seg">
+              <legend class="sr">Pole</legend>
               <label class="choice">
                 <input type="radio" name="pole" value="north" checked />
                 <span>North</span>
@@ -156,8 +139,8 @@
                 <span>South</span>
               </label>
             </fieldset>
-            <fieldset>
-              <legend>Band</legend>
+            <fieldset class="seg">
+              <legend class="sr">Band</legend>
               <label class="choice">
                 <input type="radio" name="band" value="median" checked />
                 <span>Median</span>
@@ -171,21 +154,21 @@
                 <span>High</span>
               </label>
             </fieldset>
-            <p id="scenario-help" class="help"></p>
+            <div class="view-toggles">
+              <button type="button" id="ships-btn" class="text-btn" aria-pressed="true">Ships</button>
+              <button
+                type="button"
+                id="drawer-btn"
+                class="text-btn"
+                aria-expanded="false"
+                aria-controls="drawer"
+              >
+                Impacts
+              </button>
+            </div>
             <p id="model-note" class="help" hidden>Forecast model is not ready.</p>
-          </div>
+          </section>
         </div>
-
-        <button type="button" id="ships-btn" class="text-btn" aria-pressed="true">Ships</button>
-        <button
-          type="button"
-          id="drawer-btn"
-          class="text-btn"
-          aria-expanded="false"
-          aria-controls="drawer"
-        >
-          Impacts
-        </button>
       </form>
 
       <aside id="drawer" hidden>

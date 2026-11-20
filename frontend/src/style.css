@@ -3,7 +3,7 @@
   --ink: #e7eef6;
   --muted: #8e9aab;
   --faint: #5c6a7c;
-  --line: #1b2636;
+  --line: rgba(198, 214, 230, 0.16);
   --sage: #8eae9a;
   --brass: #c6a56a;
   --clay: #c4845a;
@@ -174,12 +174,69 @@ h2 { font-size: 22px; }
 
 .bar {
   grid-area: bar;
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.4fr) auto auto auto;
-  gap: 22px;
-  align-items: end;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: center;
+  padding-top: 10px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: stretch;
+  width: min(960px, 100%);
+  border: 1px solid var(--line);
+  background: rgba(8, 14, 24, 0.55);
+}
+
+.tool {
+  flex: 1.05;
+  min-width: 0;
+  padding: 10px 14px 12px;
+}
+
+.tool + .tool { border-left: 1px solid var(--line); }
+.tool-view { flex: 1.15; }
+
+.tool-kicker {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.seg { margin-top: 8px; gap: 6px; }
+
+.view-toggles {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.stops span.is-selected {
+  color: var(--ink);
+}
+
+.text-btn {
+  border: 1px solid transparent;
+  padding: 3px 8px;
+}
+
+.text-btn[aria-pressed="true"],
+#drawer-btn[aria-expanded="true"] {
+  color: var(--ink);
+  background: rgba(231, 238, 246, 0.1);
+  border-color: var(--line);
 }
 
 .menu { position: relative; align-self: center; }
@@ -309,9 +366,17 @@ fieldset legend { margin-right: 8px; }
   cursor: pointer;
 }
 
+.choice span {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+}
+
 .choice input:checked + span {
   color: var(--ink);
-  box-shadow: inset 0 -1px 0 var(--ink);
+  background: rgba(231, 238, 246, 0.1);
+  border-color: var(--line);
+  box-shadow: none;
 }
 
 .choice:has(input:focus-visible) span {
@@ -458,7 +523,8 @@ details.def strong { display: block; color: var(--ink); font-weight: 500; }
 @media (max-width: 800px) {
   #app { height: auto; min-height: 100dvh; padding: 14px; }
   .hero { height: 78vw; container-type: size; }
-  .bar { grid-template-columns: 1fr; }
+  .toolbar { flex-direction: column; }
+  .tool + .tool { border-left: 0; border-top: 1px solid var(--line); }
   #drawer { width: min(100vw, 420px); }
   .stops { flex-wrap: wrap; }
 }
