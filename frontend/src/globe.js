@@ -404,11 +404,10 @@ function makeGraticule() {
   return lines;
 }
 
-function makeStars() {
-  const count = 160;
+function starShell(count, radiusMin, radiusSpan) {
   const positions = new Float32Array(count * 3);
   for (let i = 0; i < count; i += 1) {
-    const radius = 18 + Math.random() * 10;
+    const radius = radiusMin + Math.random() * radiusSpan;
     const theta = Math.acos(2 * Math.random() - 1);
     const phi = Math.random() * Math.PI * 2;
     positions[i * 3] = radius * Math.sin(theta) * Math.cos(phi);
@@ -417,17 +416,38 @@ function makeStars() {
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  return new THREE.Points(
-    geometry,
-    new THREE.PointsMaterial({
-      color: 0xd5d0c4,
-      size: 1.15,
-      sizeAttenuation: false,
-      transparent: true,
-      opacity: 0.38,
-      depthWrite: false,
-    }),
-  );
+  return geometry;
+}
+
+function addStars(sky, { count, size, color, opacity, glow }) {
+  const geometry = starShell(count, 15, 14);
+  const shared = {
+    sizeAttenuation: false,
+    depthWrite: false,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+  };
+  sky.add(new THREE.Points(geometry, new THREE.PointsMaterial({
+    ...shared,
+    color: glow,
+    size: size * 2.8,
+    opacity: opacity * 0.55,
+  })));
+  sky.add(new THREE.Points(geometry, new THREE.PointsMaterial({
+    ...shared,
+    color,
+    size,
+    opacity,
+  })));
+}
+
+function makeStars() {
+  const sky = new THREE.Group();
+  addStars(sky, { count: 48, size: 3.2, color: 0xffffff, opacity: 1, glow: 0xd7e6ff });
+  addStars(sky, { count: 90, size: 2.2, color: 0xd5e6ff, opacity: 0.95, glow: 0x9eb6ff });
+  addStars(sky, { count: 36, size: 3.5, color: 0xffe7b8, opacity: 1, glow: 0xffb15a });
+  addStars(sky, { count: 28, size: 2.6, color: 0xffc48a, opacity: 0.95, glow: 0xff8a4a });
+  return sky;
 }
 
 function makeRoute(lat, lon0, lon1) {
