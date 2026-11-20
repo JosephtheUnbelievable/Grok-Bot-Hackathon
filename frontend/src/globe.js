@@ -419,34 +419,50 @@ function starShell(count, radiusMin, radiusSpan) {
   return geometry;
 }
 
-function addStars(sky, { count, size, color, opacity, glow }) {
-  const geometry = starShell(count, 15, 14);
-  const shared = {
-    sizeAttenuation: false,
-    depthWrite: false,
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-  };
-  sky.add(new THREE.Points(geometry, new THREE.PointsMaterial({
-    ...shared,
-    color: glow,
-    size: size * 2.8,
-    opacity: opacity * 0.55,
-  })));
-  sky.add(new THREE.Points(geometry, new THREE.PointsMaterial({
-    ...shared,
-    color,
-    size,
-    opacity,
-  })));
+function starSprite() {
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const mid = size / 2;
+  const gradient = ctx.createRadialGradient(mid, mid, 0, mid, mid, mid);
+  gradient.addColorStop(0, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.12, "rgba(255,255,255,0.95)");
+  gradient.addColorStop(0.28, "rgba(255,255,255,0.28)");
+  gradient.addColorStop(0.55, "rgba(255,255,255,0.06)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function addStars(sky, sprite, { count, size, color, opacity }) {
+  sky.add(new THREE.Points(
+    starShell(count, 15, 14),
+    new THREE.PointsMaterial({
+      map: sprite,
+      color,
+      size,
+      opacity,
+      sizeAttenuation: false,
+      depthWrite: false,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+    }),
+  ));
 }
 
 function makeStars() {
   const sky = new THREE.Group();
-  addStars(sky, { count: 48, size: 3.2, color: 0xffffff, opacity: 1, glow: 0xd7e6ff });
-  addStars(sky, { count: 90, size: 2.2, color: 0xd5e6ff, opacity: 0.95, glow: 0x9eb6ff });
-  addStars(sky, { count: 36, size: 3.5, color: 0xffe7b8, opacity: 1, glow: 0xffb15a });
-  addStars(sky, { count: 28, size: 2.6, color: 0xffc48a, opacity: 0.95, glow: 0xff8a4a });
+  const sprite = starSprite();
+  addStars(sky, sprite, { count: 46, size: 10, color: 0xffffff, opacity: 0.95 });
+  addStars(sky, sprite, { count: 80, size: 7, color: 0xc9dcff, opacity: 0.8 });
+  addStars(sky, sprite, { count: 32, size: 12, color: 0xffe2a8, opacity: 0.9 });
+  addStars(sky, sprite, { count: 24, size: 9, color: 0xffb06a, opacity: 0.85 });
   return sky;
 }
 
