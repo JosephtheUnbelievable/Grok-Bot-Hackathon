@@ -459,10 +459,11 @@ function addStars(sky, sprite, { count, size, color, opacity }) {
 function makeStars() {
   const sky = new THREE.Group();
   const sprite = starSprite();
-  addStars(sky, sprite, { count: 46, size: 10, color: 0xffffff, opacity: 0.95 });
-  addStars(sky, sprite, { count: 80, size: 7, color: 0xc9dcff, opacity: 0.8 });
-  addStars(sky, sprite, { count: 32, size: 12, color: 0xffe2a8, opacity: 0.9 });
-  addStars(sky, sprite, { count: 24, size: 9, color: 0xffb06a, opacity: 0.85 });
+  addStars(sky, sprite, { count: 520, size: 4.5, color: 0xe7eefc, opacity: 0.72 });
+  addStars(sky, sprite, { count: 220, size: 7, color: 0xc9dcff, opacity: 0.85 });
+  addStars(sky, sprite, { count: 90, size: 10, color: 0xffffff, opacity: 0.95 });
+  addStars(sky, sprite, { count: 70, size: 11, color: 0xffe2a8, opacity: 0.9 });
+  addStars(sky, sprite, { count: 48, size: 8, color: 0xffb06a, opacity: 0.88 });
   return sky;
 }
 
