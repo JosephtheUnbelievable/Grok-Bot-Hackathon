@@ -469,6 +469,10 @@ function render() {
   $("app").dataset.mode = state.feedDown ? "down" : mode.kind;
   renderSources();
   renderBanner();
+  globe?.setRoutes(
+    state.impact?.shipping?.northern_sea_route?.open_season_days,
+    state.impact?.shipping?.northwest_passage?.open_season_days,
+  );
   renderPanel();
   renderChart($("chart"), state.extent, state.band, state.year);
 }

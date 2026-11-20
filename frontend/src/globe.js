@@ -34,16 +34,65 @@ export function createGlobe(container) {
   sun.position.set(4, 1.4, 3);
   scene.add(sun);
 
-  const iceMat = new THREE.MeshBasicMaterial({
-    transparent: true,
-    depthWrite: false,
-  });
-  const ice = new THREE.Mesh(new THREE.SphereGeometry(1.004, 80, 56), iceMat);
-  ice.renderOrder = 2;
-  ice.visible = false;
-  scene.add(ice);
-  scene.add(makeGraticule());
-  const graticule = scene.children.at(-1);
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function makeIceMesh() {
+    const material = new THREE.MeshBasicMaterial({
+      transparent: true,
+      depthWrite: false,
+      opacity: 0,
+    });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.004, 80, 56), material);
+    mesh.renderOrder = 2;
+    mesh.visible = false;
+    scene.add(mesh);
+    return mesh;
+  }
+  const iceA = makeIceMesh();
+  const iceB = makeIceMesh();
+  let shown = iceA;
+  let queued = iceB;
+  let fade = null;
+
+  const atmosphere = new THREE.Mesh(
+    new THREE.SphereGeometry(1.065, 64, 48),
+    new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.BackSide,
+      uniforms: { color: { value: new THREE.Color(0x9eb8c4) } },
+      vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vView;
+        void main() {
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          vNormal = normalize(normalMatrix * normal);
+          vView = normalize(-mv.xyz);
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vNormal;
+        varying vec3 vView;
+        uniform vec3 color;
+        void main() {
+          float rim = pow(clamp(0.55 - dot(normalize(vNormal), normalize(vView)), 0.0, 1.0), 2.4);
+          gl_FragColor = vec4(color, rim * 0.42);
+        }
+      `,
+    }),
+  );
+  atmosphere.renderOrder = 1;
+  scene.add(atmosphere);
+  scene.add(makeStars());
+
+  const graticule = makeGraticule();
+  scene.add(graticule);
+
+  const nsr = makeRoute(73, 30, 180);
+  const nwp = makeRoute(71, -140, -60);
+  scene.add(nsr);
+  scene.add(nwp);
 
   const loader = new THREE.TextureLoader();
   loader.setCrossOrigin("anonymous");
@@ -54,12 +103,39 @@ export function createGlobe(container) {
   let anim = null;
   let running = true;
 
-  function applyIce(texture, show) {
-    if (iceTexture && iceTexture !== texture) iceTexture.dispose();
+  function retire(mesh) {
+    const map = mesh.material.map;
+    mesh.visible = false;
+    mesh.material.opacity = 0;
+    mesh.material.map = null;
+    mesh.material.needsUpdate = true;
+    if (map) map.dispose();
+  }
+
+  function showIce(texture) {
+    if (!texture) {
+      fade = null;
+      retire(iceA);
+      retire(iceB);
+      iceTexture = null;
+      return;
+    }
+    const target = shown.visible ? queued : shown;
+    if (target.material.map && target.material.map !== texture) target.material.map.dispose();
+    target.material.map = texture;
+    target.material.needsUpdate = true;
+    target.visible = true;
     iceTexture = texture;
-    iceMat.map = texture;
-    iceMat.needsUpdate = true;
-    ice.visible = Boolean(show && texture);
+    if (reduceMotion || !shown.visible || shown === target) {
+      if (shown !== target) retire(shown);
+      target.material.opacity = 1;
+      shown = target;
+      queued = shown === iceA ? iceB : iceA;
+      fade = null;
+      return;
+    }
+    target.material.opacity = 0;
+    fade = { from: shown, to: target, t0: performance.now() };
   }
 
   function clearIce() {
@@ -68,7 +144,7 @@ export function createGlobe(container) {
       URL.revokeObjectURL(objectUrl);
       objectUrl = null;
     }
-    applyIce(null, false);
+    showIce(null);
   }
 
   function setIceCanvas(canvas) {
@@ -81,7 +157,7 @@ export function createGlobe(container) {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
     tex.needsUpdate = true;
-    applyIce(tex, true);
+    showIce(tex);
   }
 
   function setIceUrl(url) {
@@ -97,13 +173,18 @@ export function createGlobe(container) {
         }
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.anisotropy = 8;
-        applyIce(tex, true);
+        showIce(tex);
       },
       undefined,
       () => {
-        if (token === iceToken) applyIce(iceTexture, ice.visible);
+        if (token === iceToken && iceTexture) showIce(iceTexture);
       },
     );
+  }
+
+  function setRoutes(nsrDays, nwpDays) {
+    paintRoute(nsr, nsrDays);
+    paintRoute(nwp, nwpDays);
   }
 
   function setBasemap(url, onDone) {
@@ -115,13 +196,11 @@ export function createGlobe(container) {
         photoMat.map = tex;
         photoMat.needsUpdate = true;
         earth.material = photoMat;
-        graticule.visible = false;
         onDone?.(true);
       },
       undefined,
       () => {
         earth.material = fallbackMat;
-        graticule.visible = true;
         onDone?.(false);
       },
     );
@@ -176,7 +255,6 @@ export function createGlobe(container) {
       nudge(0, -step);
     }
   });
-  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let idleTimer = 0;
   function armIdle() {
     controls.autoRotate = false;
@@ -243,6 +321,18 @@ export function createGlobe(container) {
     } else {
       controls.update();
     }
+    if (fade) {
+      const u = reduceMotion ? 1 : Math.min(1, (now - fade.t0) / 420);
+      fade.from.material.opacity = 1 - u;
+      fade.to.material.opacity = u;
+      if (u >= 1) {
+        retire(fade.from);
+        fade.to.material.opacity = 1;
+        shown = fade.to;
+        queued = shown === iceA ? iceB : iceA;
+        fade = null;
+      }
+    }
     renderer.render(scene, camera);
   }
   requestAnimationFrame(frame);
@@ -252,6 +342,7 @@ export function createGlobe(container) {
     setIceCanvas,
     setIceUrl,
     clearIce,
+    setRoutes,
     lookNorth() {
       look(-40, 89);
     },
@@ -266,34 +357,97 @@ export function createGlobe(container) {
   };
 }
 
+function latLon(lat, lon, radius) {
+  const phi = ((lon + 180) * Math.PI) / 180;
+  const theta = ((90 - lat) * Math.PI) / 180;
+  return new THREE.Vector3(
+    -Math.cos(phi) * Math.sin(theta) * radius,
+    Math.cos(theta) * radius,
+    Math.sin(phi) * Math.sin(theta) * radius,
+  );
+}
+
 function makeGraticule() {
   const positions = [];
-  const r = 1.003;
+  const r = 1.008;
   const push = (lat, lon) => {
-    const phi = ((lon + 180) * Math.PI) / 180;
-    const theta = ((90 - lat) * Math.PI) / 180;
-    positions.push(
-      -Math.cos(phi) * Math.sin(theta) * r,
-      Math.cos(theta) * r,
-      Math.sin(phi) * Math.sin(theta) * r,
-    );
+    const p = latLon(lat, lon, r);
+    positions.push(p.x, p.y, p.z);
   };
-  for (let lat = -60; lat <= 60; lat += 30) {
-    for (let lon = -180; lon < 180; lon += 5) {
+  const parallels = [-66.5, -60, -30, 0, 30, 60, 66.5];
+  for (const lat of parallels) {
+    for (let lon = -180; lon < 180; lon += 8) {
       push(lat, lon);
-      push(lat, lon + 5);
+      push(lat, lon + 8);
     }
   }
   for (let lon = -180; lon < 180; lon += 30) {
-    for (let lat = -90; lat < 90; lat += 5) {
+    for (let lat = -90; lat < 90; lat += 6) {
       push(lat, lon);
-      push(Math.min(90, lat + 5), lon);
+      push(Math.min(90, lat + 6), lon);
     }
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  return new THREE.LineSegments(
+  const lines = new THREE.LineSegments(
     geometry,
-    new THREE.LineBasicMaterial({ color: 0x7f97a3, transparent: true, opacity: 0.35 }),
+    new THREE.LineBasicMaterial({ color: 0xb7c4c0, transparent: true, opacity: 0.16, depthWrite: false }),
   );
+  lines.renderOrder = 3;
+  return lines;
+}
+
+function makeStars() {
+  const count = 160;
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i += 1) {
+    const radius = 18 + Math.random() * 10;
+    const theta = Math.acos(2 * Math.random() - 1);
+    const phi = Math.random() * Math.PI * 2;
+    positions[i * 3] = radius * Math.sin(theta) * Math.cos(phi);
+    positions[i * 3 + 1] = radius * Math.cos(theta);
+    positions[i * 3 + 2] = radius * Math.sin(theta) * Math.sin(phi);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  return new THREE.Points(
+    geometry,
+    new THREE.PointsMaterial({
+      color: 0xd5d0c4,
+      size: 1.15,
+      sizeAttenuation: false,
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+    }),
+  );
+}
+
+function makeRoute(lat, lon0, lon1) {
+  const points = [];
+  const steps = 40;
+  for (let i = 0; i <= steps; i += 1) {
+    const lon = lon0 + ((lon1 - lon0) * i) / steps;
+    points.push(latLon(lat, lon, 1.012));
+  }
+  const curve = new THREE.CatmullRomCurve3(points);
+  const mesh = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 48, 0.008, 5, false),
+    new THREE.MeshBasicMaterial({
+      color: 0xd5e6ee,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    }),
+  );
+  mesh.renderOrder = 4;
+  mesh.visible = false;
+  return mesh;
+}
+
+function paintRoute(mesh, days) {
+  const n = Number(days);
+  const opacity = Number.isFinite(n) ? Math.max(0, Math.min(0.8, n / 180)) : 0;
+  mesh.material.opacity = opacity;
+  mesh.visible = opacity > 0.02;
 }
