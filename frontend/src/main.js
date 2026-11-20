@@ -158,7 +158,15 @@ let timer = 0;
 let token = 0;
 let inflight = null;
 
+function setLoading(on) {
+  state.loading = on;
+  const bar = $("impact-loading");
+  if (bar) bar.hidden = !on;
+  $("panel-body")?.classList.toggle("is-loading", on);
+}
+
 function schedule() {
+  setLoading(true);
   window.clearTimeout(timer);
   timer = window.setTimeout(refresh, 40);
 }
@@ -268,6 +276,10 @@ function el(tag, className, text) {
   return node;
 }
 
+function finite(value) {
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+}
+
 function stat(label, value, extraClass) {
   const row = el("div", extraClass ? `stat ${extraClass}` : "stat");
   row.append(el("span", null, label), el("b", null, value));
@@ -289,62 +301,75 @@ function renderPanel() {
   body.append(el("h2", null, "Impacts"));
   const blend = Number(state.blend).toFixed(1);
   body.append(el("p", "sub", `Year ${state.year} · blend ${blend} · ${scenarioLabel(state.blend)}`));
-  if (USE_FIXTURES || state.impact?.fixture) {
-    const sampleYear = state.impact?.year ?? "the fixture";
-    body.append(el(
-      "p",
-      "sub",
-      `Fixture sample for ${sampleYear}. Requested year ${state.year}, blend ${blend}.`,
-    ));
+  if (state.impact?.fixture) {
+    body.append(el("p", "sub", `Fixture sample for ${state.impact.year}.`));
   }
   if (state.queryError) body.append(el("p", "warn", state.queryError));
 
   const impact = state.impact;
-  if (!impact) {
-    body.append(el("p", "sub", "No impact response."));
-  } else {
+  if (impact) {
+    const nsr = impact.shipping?.northern_sea_route;
+    const nwp = impact.shipping?.northwest_passage;
     const ship = el("div", "block");
-    ship.append(el("h3", null, "Shipping season"));
-    const nsr = impact.shipping?.northern_sea_route || {};
-    const nwp = impact.shipping?.northwest_passage || {};
-    ship.append(stat("Northern Sea Route", days(nsr.open_season_days)));
-    ship.append(stat("Opening", formatOpening(nsr.opening_date)));
-    ship.append(stat("Northwest Passage", days(nwp.open_season_days)));
-    ship.append(stat("Opening", formatOpening(nwp.opening_date)));
-    ship.append(el("p", "proxy", "Proxy, not a route solver."));
-    body.append(ship);
+    let shipRows = 0;
+    if (nsr && finite(nsr.open_season_days)) {
+      ship.append(el("h3", null, "Shipping season"));
+      ship.append(stat("Northern Sea Route", days(nsr.open_season_days)));
+      if (nsr.opening_date) ship.append(stat("Opening", formatOpening(nsr.opening_date)));
+      else if (Number(nsr.open_season_days) === 0) ship.append(stat("Opening", "does not open"));
+      shipRows += 1;
+    }
+    if (nwp && finite(nwp.open_season_days)) {
+      if (!ship.querySelector("h3")) ship.append(el("h3", null, "Shipping season"));
+      ship.append(stat("Northwest Passage", days(nwp.open_season_days)));
+      if (nwp.opening_date) ship.append(stat("Opening", formatOpening(nwp.opening_date)));
+      else if (Number(nwp.open_season_days) === 0) ship.append(stat("Opening", "does not open"));
+      shipRows += 1;
+    }
+    if (shipRows) {
+      ship.append(el("p", "proxy", "Proxy, not a route solver."));
+      body.append(ship);
+    }
 
     const communities = impact.communities || {};
     const winter = el("div", "block");
-    winter.append(el("h3", null, "Winter ice"));
-    const iceFree = communities.ice_free_september_year;
-    winter.append(stat(
-      "First ice-free September",
-      iceFree == null ? "None" : String(iceFree),
-    ));
-    winter.append(stat(
-      "Winter sea-ice loss",
-      formatIndex(communities.winter_ice_loss_index) || "—",
-    ));
-    body.append(winter);
+    let winterRows = 0;
+    if (finite(communities.ice_free_september_year)) {
+      winter.append(el("h3", null, "Winter ice"));
+      winter.append(stat("First ice-free September", String(communities.ice_free_september_year)));
+      winterRows += 1;
+    }
+    if (finite(communities.winter_ice_loss_index)) {
+      if (!winterRows) winter.append(el("h3", null, "Winter ice"));
+      winter.append(stat("Winter sea-ice loss", formatIndex(communities.winter_ice_loss_index)));
+      winterRows += 1;
+    }
+    if (winterRows) body.append(winter);
 
     const sea = impact.sea_level || {};
     const level = el("div", "block");
-    level.append(el("h3", null, "Sea level"));
-    level.append(stat("Greenland", formatMm(sea.greenland_mm)));
-    level.append(stat("Antarctica", formatMm(sea.antarctica_mm)));
-    level.append(stat("Total", formatMm(sea.total_mm), "total"));
-    const low = sea.low_mm;
-    const high = sea.high_mm;
-    const band = low == null || high == null
-      ? "—"
-      : `${Math.round(Number(low))}–${Math.round(Number(high))} mm`;
-    level.append(stat("Low–high total", band));
-    const seaCaption = seaLevelCaption(sea.source);
-    if (seaCaption) level.append(el("p", "caption", seaCaption));
-    body.append(level);
+    let seaRows = 0;
+    const seaStat = (label, value, extra) => {
+      if (!finite(value)) return;
+      if (!seaRows) level.append(el("h3", null, "Sea level"));
+      level.append(stat(label, formatMm(value), extra));
+      seaRows += 1;
+    };
+    seaStat("Greenland", sea.greenland_mm);
+    seaStat("Antarctica", sea.antarctica_mm);
+    seaStat("Total", sea.total_mm, "total");
+    if (finite(sea.low_mm) && finite(sea.high_mm)) {
+      if (!seaRows) level.append(el("h3", null, "Sea level"));
+      level.append(stat("Low–high total", `${Math.round(Number(sea.low_mm))}–${Math.round(Number(sea.high_mm))} mm`));
+      seaRows += 1;
+    }
+    if (seaRows) {
+      const seaCaption = seaLevelCaption(sea.source);
+      if (seaCaption) level.append(el("p", "caption", seaCaption));
+      body.append(level);
+    }
 
-    const regressor = regressorCaption(impact.regressor || state.health?.regressor || state.iceMeta?.regressor);
+    const regressor = regressorCaption(impact.regressor);
     if (regressor) body.append(el("p", "caption", regressor));
 
     const details = document.createElement("details");
@@ -352,12 +377,16 @@ function renderPanel() {
     const summary = document.createElement("summary");
     summary.textContent = "Definitions";
     details.append(summary);
-    addDef(details, "Northern Sea Route", nsr.definition);
-    addDef(details, "Northwest Passage", nwp.definition);
-    addDef(details, "First ice-free September", communities.definitions?.ice_free_september_year);
-    addDef(details, "Winter sea-ice loss", communities.definitions?.winter_ice_loss_index);
-    if (sea.baseline) addDef(details, "Sea level", sea.baseline);
-    body.append(details);
+    if (shipRows) {
+      addDef(details, "Northern Sea Route", nsr?.definition);
+      addDef(details, "Northwest Passage", nwp?.definition);
+    }
+    if (winterRows) {
+      addDef(details, "First ice-free September", communities.definitions?.ice_free_september_year);
+      addDef(details, "Winter sea-ice loss", communities.definitions?.winter_ice_loss_index);
+    }
+    if (seaRows && sea.baseline) addDef(details, "Sea level", sea.baseline);
+    if (details.querySelector("p")) body.append(details);
   }
 
   if (state.backtest?.trained) {
@@ -511,7 +540,7 @@ async function refresh() {
   const iceFailed = ice.status === "rejected" && ice.reason?.name !== "AbortError";
   const impactFailed = impact.status === "rejected" && impact.reason?.name !== "AbortError";
   const healthFailed = health.status === "rejected" && health.reason?.name !== "AbortError";
-  state.feedDown = rejectedDown(health) || rejectedDown(ice) || rejectedDown(impact);
+  state.feedDown = rejectedDown(health) || rejectedDown(ice);
 
   if (health.status === "fulfilled") {
     state.health = health.value;
@@ -552,6 +581,7 @@ async function refresh() {
     state.queryError = ice.reason?.message || impact.reason?.message || state.queryError;
   }
 
+  setLoading(false);
   render();
 }
 

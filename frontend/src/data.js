@@ -292,7 +292,6 @@ export async function loadExtent(state, signal) {
 }
 
 export async function loadImpact(state, signal) {
-  if (USE_FIXTURES) return clone(impactFixture);
   const params = new URLSearchParams();
   params.set("year", String(state.year));
   params.set("blend", blendParam(state.blend));
